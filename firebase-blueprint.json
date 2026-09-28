@@ -1,0 +1,121 @@
+{
+  "entities": {
+    "Beneficiary": {
+      "title": "Beneficiary Member Profile",
+      "description": "Registered ministry member or beneficiary profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fullName": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "network": { "type": "string" },
+        "category": { "type": "string" },
+        "defaultAmount": { "type": "number" },
+        "notes": { "type": "string" },
+        "zoomName": { "type": "string" },
+        "whatsappName": { "type": "string" },
+        "aliases": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "totalReceivedAmount": { "type": "number" },
+        "totalTransfersCount": { "type": "number" },
+        "lastDisbursedDate": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "fullName", "phoneNumber", "network", "category"]
+    },
+    "AttendanceSession": {
+      "title": "Attendance Session Record",
+      "description": "Roll call attendance session for Daily Morning Devotionals & Services",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "serviceName": { "type": "string" },
+        "serviceType": { "type": "string" },
+        "serviceDate": { "type": "string" },
+        "recordedBy": { "type": "string" },
+        "notes": { "type": "string" },
+        "records": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "serviceName", "serviceType", "serviceDate"]
+    },
+    "AirtimeRecord": {
+      "title": "Airtime Distribution Receipt Record",
+      "description": "Log and proof of airtime distribution transaction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "receiptNo": { "type": "string" },
+        "beneficiaryName": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "network": { "type": "string" },
+        "amount": { "type": "number" },
+        "purpose": { "type": "string" },
+        "distributionDate": { "type": "string" },
+        "distributionTime": { "type": "string" },
+        "distributedBy": { "type": "string" },
+        "notes": { "type": "string" },
+        "status": { "type": "string" },
+        "evidenceUrl": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "receiptNo", "beneficiaryName", "amount"]
+    },
+    "BulkMessageLog": {
+      "title": "Bulk Messaging Log",
+      "description": "Record of broadcast bulk SMS or WhatsApp messages",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "targetCategory": { "type": "string" },
+        "channel": { "type": "string" },
+        "recipientCount": { "type": "number" },
+        "messageText": { "type": "string" },
+        "sentBy": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "targetCategory", "channel", "messageText"]
+    },
+    "AuditLog": {
+      "title": "Ministry System Audit Trail",
+      "description": "Security and activity audit log",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "user": { "type": "string" },
+        "role": { "type": "string" },
+        "action": { "type": "string" },
+        "details": { "type": "string" },
+        "recordId": { "type": "string" }
+      },
+      "required": ["id", "timestamp", "user", "action", "details"]
+    }
+  },
+  "firestore": {
+    "/beneficiaries/{beneficiaryId}": {
+      "schema": "Beneficiary",
+      "description": "Collection of registered members and beneficiaries"
+    },
+    "/attendanceSessions/{sessionId}": {
+      "schema": "AttendanceSession",
+      "description": "Collection of recorded service attendance sessions"
+    },
+    "/airtimeRecords/{recordId}": {
+      "schema": "AirtimeRecord",
+      "description": "Collection of airtime distribution transaction records"
+    },
+    "/bulkMessageLogs/{logId}": {
+      "schema": "BulkMessageLog",
+      "description": "Collection of sent bulk notification logs"
+    },
+    "/auditLogs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Collection of system activity audit logs"
+    }
+  }
+}

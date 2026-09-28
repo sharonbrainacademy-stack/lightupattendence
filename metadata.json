@@ -1,0 +1,6 @@
+{
+  "name": "Light Up Prayer House — Family Outreach Airtime System",
+  "description": "Mobile-friendly airtime distribution, receipt generator, and evidence storage system for Light Up Prayer House Family Outreach ministry.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

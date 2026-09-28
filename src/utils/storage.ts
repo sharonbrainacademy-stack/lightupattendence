@@ -1,0 +1,768 @@
+import { AirtimeRecord, AuditLog, UserRole, Beneficiary, AttendanceSession, BulkMessageLog } from '../types';
+import { INITIAL_SAMPLE_RECORDS, INITIAL_AUDIT_LOGS, INITIAL_REGISTERED_BENEFICIARIES } from './sampleData';
+import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+
+/**
+ * Recursively cleans JS objects before passing to Firestore setDoc/addDoc
+ * by removing any keys whose value is undefined, which Firestore rejects with error:
+ * Unsupported field value: undefined
+ */
+export function sanitizeForFirestore<T>(data: T): T {
+  if (data === null || data === undefined) {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return data
+      .filter(item => item !== undefined)
+      .map(item => sanitizeForFirestore(item)) as unknown as T;
+  }
+  if (typeof data === 'object') {
+    const cleaned: Record<string, any> = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined) {
+        cleaned[key] = sanitizeForFirestore(value);
+      }
+    }
+    return cleaned as T;
+  }
+  return data;
+}
+
+const RECORDS_KEY = 'lu_prayer_house_airtime_records_v1';
+const AUDIT_LOGS_KEY = 'lu_prayer_house_audit_logs_v1';
+const BENEFICIARIES_KEY = 'lu_prayer_house_beneficiaries_esther_benin_v3';
+const ATTENDANCE_KEY = 'lu_prayer_house_attendance_v1';
+const BULK_MSG_KEY = 'lu_prayer_house_bulk_msg_v1';
+const ADMIN_PASS_KEY = 'lu_prayer_house_admin_pass_v1';
+const USER_ROLE_KEY = 'lu_prayer_house_user_role_v1';
+const USER_NAME_KEY = 'lu_prayer_house_user_name_v1';
+
+let isSeedingBeneficiaries = false;
+let isSeedingAttendance = false;
+let isSeedingRecords = false;
+
+function getInitialSampleAttendanceSessions(): AttendanceSession[] {
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
+
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+  const prev3Days = new Date(today);
+  prev3Days.setDate(today.getDate() - 3);
+  const prev3DaysStr = prev3Days.toISOString().split('T')[0];
+
+  return [
+    {
+      id: `att-sample-today`,
+      serviceName: 'Daily Morning Devotional Prayers',
+      serviceType: 'Daily Morning Devotional',
+      serviceDate: todayStr,
+      recordedBy: 'Bro Stephen',
+      notes: '05:00 AM WAT Daily Morning Devotional Prayers & covenant blessing for Esther Group members.',
+      records: INITIAL_REGISTERED_BENEFICIARIES.map((b, idx) => ({
+        beneficiaryId: b.id,
+        fullName: b.fullName,
+        phoneNumber: b.phoneNumber,
+        category: b.category,
+        status: idx % 11 === 0 ? 'Late' : idx % 9 === 0 ? 'Absent' : 'Present',
+        checkInTime: '05:02'
+      })),
+      createdAt: today.toISOString(),
+      updatedAt: today.toISOString()
+    },
+    {
+      id: `att-sample-yesterday`,
+      serviceName: 'Daily Morning Devotional Prayers',
+      serviceType: 'Daily Morning Devotional',
+      serviceDate: yesterdayStr,
+      recordedBy: 'Bro Stephen',
+      notes: 'Glorious morning revival session. Attendance taken at 05:15 AM WAT.',
+      records: INITIAL_REGISTERED_BENEFICIARIES.map((b, idx) => ({
+        beneficiaryId: b.id,
+        fullName: b.fullName,
+        phoneNumber: b.phoneNumber,
+        category: b.category,
+        status: idx % 7 === 0 ? 'Absent' : idx % 12 === 0 ? 'Late' : 'Present',
+        checkInTime: '05:05'
+      })),
+      createdAt: yesterday.toISOString(),
+      updatedAt: yesterday.toISOString()
+    },
+    {
+      id: `att-sample-prev3`,
+      serviceName: 'Special Revival Fellowship',
+      serviceType: 'Special Revival',
+      serviceDate: prev3DaysStr,
+      recordedBy: 'Bro Stephen',
+      notes: 'Special miracle & revival service with full Esther Group Benin turnout.',
+      records: INITIAL_REGISTERED_BENEFICIARIES.map((b, idx) => ({
+        beneficiaryId: b.id,
+        fullName: b.fullName,
+        phoneNumber: b.phoneNumber,
+        category: b.category,
+        status: idx % 15 === 0 ? 'Absent' : 'Present',
+        checkInTime: '05:00'
+      })),
+      createdAt: prev3Days.toISOString(),
+      updatedAt: prev3Days.toISOString()
+    }
+  ];
+}
+
+// ================= REAL-TIME FIRESTORE SUBSCRIPTIONS =================
+
+export function subscribeToBeneficiaries(callback: (list: Beneficiary[]) => void) {
+  const colRef = collection(db, 'beneficiaries');
+  return onSnapshot(colRef, (snapshot) => {
+    if (snapshot.empty && !isSeedingBeneficiaries) {
+      isSeedingBeneficiaries = true;
+      const localList = getBeneficiaries();
+      const initialList = localList.length > 0 ? localList : INITIAL_REGISTERED_BENEFICIARIES;
+      initialList.forEach(b => {
+        setDoc(doc(db, 'beneficiaries', b.id), sanitizeForFirestore(b)).catch(err => handleFirestoreError(err, OperationType.WRITE, `beneficiaries/${b.id}`));
+      });
+      saveBeneficiaries(initialList);
+      callback(initialList);
+      return;
+    }
+
+    const list: Beneficiary[] = [];
+    snapshot.forEach(docSnap => {
+      list.push(docSnap.data() as Beneficiary);
+    });
+
+    if (list.length > 0) {
+      // Sort beneficiaries alphabetically by full name for a stable, predictable order
+      list.sort((a, b) => (a.fullName || '').localeCompare(b.fullName || ''));
+      saveBeneficiaries(list);
+      callback(list);
+    }
+  }, (err) => {
+    handleFirestoreError(err, OperationType.GET, 'beneficiaries');
+  });
+}
+
+export function subscribeToAttendanceSessions(callback: (list: AttendanceSession[]) => void) {
+  const colRef = collection(db, 'attendanceSessions');
+  return onSnapshot(colRef, (snapshot) => {
+    if (snapshot.empty && !isSeedingAttendance) {
+      isSeedingAttendance = true;
+      const initialSessions = getInitialSampleAttendanceSessions();
+      initialSessions.forEach(s => {
+        setDoc(doc(db, 'attendanceSessions', s.id), sanitizeForFirestore(s)).catch(err => handleFirestoreError(err, OperationType.WRITE, `attendanceSessions/${s.id}`));
+      });
+      localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(initialSessions));
+      callback(initialSessions);
+      return;
+    }
+
+    const list: AttendanceSession[] = [];
+    snapshot.forEach(docSnap => {
+      list.push(docSnap.data() as AttendanceSession);
+    });
+
+    if (list.length > 0) {
+      list.sort((a, b) => b.serviceDate.localeCompare(a.serviceDate));
+      localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(list));
+      callback(list);
+    }
+  }, (err) => {
+    handleFirestoreError(err, OperationType.GET, 'attendanceSessions');
+  });
+}
+
+export function subscribeToRecords(callback: (list: AirtimeRecord[]) => void) {
+  const colRef = collection(db, 'airtimeRecords');
+  return onSnapshot(colRef, (snapshot) => {
+    if (snapshot.empty && !isSeedingRecords) {
+      isSeedingRecords = true;
+      INITIAL_SAMPLE_RECORDS.forEach(r => {
+        setDoc(doc(db, 'airtimeRecords', r.id), sanitizeForFirestore(r)).catch(err => handleFirestoreError(err, OperationType.WRITE, `airtimeRecords/${r.id}`));
+      });
+      saveRecords(INITIAL_SAMPLE_RECORDS);
+      callback(INITIAL_SAMPLE_RECORDS);
+      return;
+    }
+
+    const list: AirtimeRecord[] = [];
+    snapshot.forEach(docSnap => {
+      list.push(docSnap.data() as AirtimeRecord);
+    });
+
+    if (list.length > 0) {
+      list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      saveRecords(list);
+      callback(list);
+    }
+  }, (err) => {
+    handleFirestoreError(err, OperationType.GET, 'airtimeRecords');
+  });
+}
+
+export function subscribeToAuditLogs(callback: (list: AuditLog[]) => void) {
+  const colRef = collection(db, 'auditLogs');
+  return onSnapshot(colRef, (snapshot) => {
+    const list: AuditLog[] = [];
+    snapshot.forEach(docSnap => {
+      list.push(docSnap.data() as AuditLog);
+    });
+    if (list.length > 0) {
+      list.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+      localStorage.setItem(AUDIT_LOGS_KEY, JSON.stringify(list));
+      callback(list);
+    }
+  }, (err) => {
+    handleFirestoreError(err, OperationType.GET, 'auditLogs');
+  });
+}
+
+export function subscribeToBulkLogs(callback: (list: BulkMessageLog[]) => void) {
+  const colRef = collection(db, 'bulkMessageLogs');
+  return onSnapshot(colRef, (snapshot) => {
+    const list: BulkMessageLog[] = [];
+    snapshot.forEach(docSnap => {
+      list.push(docSnap.data() as BulkMessageLog);
+    });
+    if (list.length > 0) {
+      list.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+      localStorage.setItem(BULK_MSG_KEY, JSON.stringify(list));
+      callback(list);
+    }
+  }, (err) => {
+    handleFirestoreError(err, OperationType.GET, 'bulkMessageLogs');
+  });
+}
+
+// ================= BENEFICIARY METHODS =================
+
+export function getBeneficiaries(): Beneficiary[] {
+  try {
+    const raw = localStorage.getItem(BENEFICIARIES_KEY);
+    if (!raw) {
+      localStorage.setItem(BENEFICIARIES_KEY, JSON.stringify(INITIAL_REGISTERED_BENEFICIARIES));
+      return INITIAL_REGISTERED_BENEFICIARIES;
+    }
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error('Error reading beneficiaries:', err);
+    return INITIAL_REGISTERED_BENEFICIARIES;
+  }
+}
+
+export function saveBeneficiaries(beneficiaries: Beneficiary[]): void {
+  try {
+    localStorage.setItem(BENEFICIARIES_KEY, JSON.stringify(beneficiaries));
+  } catch (err) {
+    console.error('Error saving beneficiaries:', err);
+  }
+}
+
+export function addBeneficiary(b: Beneficiary, user: string, role: UserRole): Beneficiary[] {
+  const current = getBeneficiaries();
+  const updated = [b, ...current];
+  saveBeneficiaries(updated);
+
+  // Sync to Firestore
+  setDoc(doc(db, 'beneficiaries', b.id), sanitizeForFirestore(b)).catch(err => handleFirestoreError(err, OperationType.WRITE, `beneficiaries/${b.id}`));
+
+  addAuditLog({
+    id: `log-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    user,
+    role,
+    action: 'CREATE',
+    details: `Registered new beneficiary: ${b.fullName} (${b.phoneNumber}, ${b.network} - ${b.category})`
+  });
+
+  return updated;
+}
+
+export function updateBeneficiary(b: Beneficiary, user: string, role: UserRole): Beneficiary[] {
+  const current = getBeneficiaries();
+  const idx = current.findIndex(item => item.id === b.id);
+  const oldB = idx !== -1 ? current[idx] : null;
+  
+  const updated = idx !== -1 ? [...current] : [b, ...current];
+  if (idx !== -1) {
+    updated[idx] = b;
+  }
+  saveBeneficiaries(updated);
+
+  // Sync to Firestore
+  setDoc(doc(db, 'beneficiaries', b.id), sanitizeForFirestore(b)).catch(err => {
+    console.error('Firestore update error for beneficiary:', err);
+    handleFirestoreError(err, OperationType.WRITE, `beneficiaries/${b.id}`);
+  });
+
+  // Propagate name/phone/category update to existing Attendance Sessions in real time
+  try {
+    const sessions = getAttendanceSessions();
+    let sessionsChanged = false;
+    const updatedSessions = sessions.map(s => {
+      let recsChanged = false;
+      const updatedRecords = (s.records || []).map(rec => {
+        const bPhoneClean = (b.phoneNumber || '').replace(/\s+/g, '');
+        const recPhoneClean = (rec.phoneNumber || '').replace(/\s+/g, '');
+        const recNameClean = (rec.fullName || '').toLowerCase().trim();
+        const oldNameClean = (oldB?.fullName || '').toLowerCase().trim();
+
+        const isMatch = (rec.beneficiaryId && rec.beneficiaryId === b.id) ||
+                        (bPhoneClean && recPhoneClean && recPhoneClean === bPhoneClean) ||
+                        (oldNameClean && recNameClean && recNameClean === oldNameClean);
+        if (isMatch) {
+          recsChanged = true;
+          return {
+            ...rec,
+            fullName: b.fullName,
+            phoneNumber: b.phoneNumber,
+            category: b.category,
+          };
+        }
+        return rec;
+      });
+      if (recsChanged) {
+        sessionsChanged = true;
+        const newS = { ...s, records: updatedRecords, updatedAt: new Date().toISOString() };
+        setDoc(doc(db, 'attendanceSessions', s.id), sanitizeForFirestore(newS)).catch(err => {
+          console.error('Firestore update error for attendance session:', err);
+        });
+        return newS;
+      }
+      return s;
+    });
+
+    if (sessionsChanged) {
+      localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(updatedSessions));
+    }
+  } catch (e) {
+    console.error('Error propagating beneficiary update to attendance:', e);
+  }
+
+  // Propagate name/phone update to existing Airtime Records in real time
+  try {
+    const records = getStoredRecords();
+    let recordsChanged = false;
+    const updatedRecords = records.map(rec => {
+      const bPhoneClean = (b.phoneNumber || '').replace(/\s+/g, '');
+      const recPhoneClean = (rec.phoneNumber || '').replace(/\s+/g, '');
+      const recNameClean = (rec.beneficiaryName || '').toLowerCase().trim();
+      const oldNameClean = (oldB?.fullName || '').toLowerCase().trim();
+
+      const isMatch = (bPhoneClean && recPhoneClean && recPhoneClean === bPhoneClean) ||
+                      (oldNameClean && recNameClean && recNameClean === oldNameClean);
+      if (isMatch) {
+        recordsChanged = true;
+        const newR = {
+          ...rec,
+          beneficiaryName: b.fullName,
+          phoneNumber: b.phoneNumber,
+          purpose: b.category,
+          network: b.network,
+          updatedAt: new Date().toISOString()
+        };
+        setDoc(doc(db, 'airtimeRecords', rec.id), sanitizeForFirestore(newR)).catch(err => {
+          console.error('Firestore update error for airtime record:', err);
+        });
+        return newR;
+      }
+      return rec;
+    });
+
+    if (recordsChanged) {
+      saveRecords(updatedRecords);
+    }
+  } catch (e) {
+    console.error('Error propagating beneficiary update to records:', e);
+  }
+
+  addAuditLog({
+    id: `log-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    user,
+    role,
+    action: 'EDIT',
+    details: `Updated beneficiary profile for: ${b.fullName}`
+  });
+
+  return updated;
+}
+
+export function deleteBeneficiary(id: string, user: string, role: UserRole): Beneficiary[] {
+  const current = getBeneficiaries();
+  const target = current.find(item => item.id === id);
+  const updated = current.filter(item => item.id !== id);
+  saveBeneficiaries(updated);
+
+  // Sync delete to Firestore
+  deleteDoc(doc(db, 'beneficiaries', id)).catch(err => handleFirestoreError(err, OperationType.DELETE, `beneficiaries/${id}`));
+
+  if (target) {
+    addAuditLog({
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      user,
+      role,
+      action: 'DELETE',
+      details: `Removed beneficiary profile: ${target.fullName}`
+    });
+  }
+
+  return updated;
+}
+
+// ================= ATTENDANCE METHODS =================
+
+export function getAttendanceSessions(): AttendanceSession[] {
+  try {
+    const raw = localStorage.getItem(ATTENDANCE_KEY);
+    if (!raw) {
+      const sampleSessions = getInitialSampleAttendanceSessions();
+      localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(sampleSessions));
+      return sampleSessions;
+    }
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error('Error reading attendance sessions:', err);
+    return [];
+  }
+}
+
+export function saveAttendanceSession(session: AttendanceSession, user: string, role: UserRole): AttendanceSession[] {
+  const current = getAttendanceSessions();
+  const index = current.findIndex(s => s.id === session.id);
+  let updated: AttendanceSession[];
+
+  if (index !== -1) {
+    updated = [...current];
+    updated[index] = {
+      ...session,
+      updatedAt: new Date().toISOString()
+    };
+  } else {
+    updated = [session, ...current];
+  }
+
+  saveAttendanceSessionToLocalAndFirestore(session, updated);
+
+  const presentCount = session.records.filter(r => r.status === 'Present' || r.status === 'Late').length;
+  const totalCount = session.records.length;
+
+  addAuditLog({
+    id: `log-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    user,
+    role,
+    action: index !== -1 ? 'EDIT' : 'CREATE',
+    details: `Recorded attendance for ${session.serviceName} (${session.serviceDate}): ${presentCount}/${totalCount} Present`
+  });
+
+  return updated;
+}
+
+function saveAttendanceSessionToLocalAndFirestore(session: AttendanceSession, updatedList: AttendanceSession[]) {
+  try {
+    localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(updatedList));
+  } catch (err) {
+    console.error('Error saving attendance session:', err);
+  }
+
+  setDoc(doc(db, 'attendanceSessions', session.id), sanitizeForFirestore(session)).catch(err => handleFirestoreError(err, OperationType.WRITE, `attendanceSessions/${session.id}`));
+}
+
+export function deleteAttendanceSession(id: string, user: string, role: UserRole): AttendanceSession[] {
+  const current = getAttendanceSessions();
+  const target = current.find(s => s.id === id);
+  const updated = current.filter(s => s.id !== id);
+
+  try {
+    localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(updated));
+  } catch (err) {
+    console.error('Error deleting attendance session:', err);
+  }
+
+  deleteDoc(doc(db, 'attendanceSessions', id)).catch(err => handleFirestoreError(err, OperationType.DELETE, `attendanceSessions/${id}`));
+
+  if (target) {
+    addAuditLog({
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      user,
+      role,
+      action: 'DELETE',
+      details: `Deleted attendance session record for ${target.serviceName} (${target.serviceDate})`
+    });
+  }
+
+  return updated;
+}
+
+// ================= AIRTIME RECORD METHODS =================
+
+export function getStoredRecords(): AirtimeRecord[] {
+  try {
+    const raw = localStorage.getItem(RECORDS_KEY);
+    if (!raw) {
+      localStorage.setItem(RECORDS_KEY, JSON.stringify(INITIAL_SAMPLE_RECORDS));
+      return INITIAL_SAMPLE_RECORDS;
+    }
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error('Error reading stored records:', err);
+    return INITIAL_SAMPLE_RECORDS;
+  }
+}
+
+export function saveRecords(records: AirtimeRecord[]): void {
+  try {
+    localStorage.setItem(RECORDS_KEY, JSON.stringify(records));
+  } catch (err) {
+    console.error('Error saving records:', err);
+  }
+}
+
+export function addRecord(record: AirtimeRecord, user: string, role: UserRole): AirtimeRecord[] {
+  const current = getStoredRecords();
+  const updated = [record, ...current];
+  saveRecords(updated);
+
+  setDoc(doc(db, 'airtimeRecords', record.id), sanitizeForFirestore(record)).catch(err => handleFirestoreError(err, OperationType.WRITE, `airtimeRecords/${record.id}`));
+
+  addAuditLog({
+    id: `log-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    user,
+    role,
+    action: 'CREATE',
+    details: `Added distribution of ₦${record.amount} (${record.network}) to ${record.beneficiaryName} - ${record.purpose}`,
+    recordId: record.id
+  });
+
+  return updated;
+}
+
+export function updateRecord(updatedRecord: AirtimeRecord, user: string, role: UserRole): AirtimeRecord[] {
+  const current = getStoredRecords();
+  const index = current.findIndex(r => r.id === updatedRecord.id);
+  if (index === -1) return current;
+
+  const newRecords = [...current];
+  newRecords[index] = {
+    ...updatedRecord,
+    updatedAt: new Date().toISOString()
+  };
+  saveRecords(newRecords);
+
+  setDoc(doc(db, 'airtimeRecords', updatedRecord.id), sanitizeForFirestore(newRecords[index])).catch(err => handleFirestoreError(err, OperationType.WRITE, `airtimeRecords/${updatedRecord.id}`));
+
+  addAuditLog({
+    id: `log-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    user,
+    role,
+    action: 'EDIT',
+    details: `Updated details for ${updatedRecord.beneficiaryName} (${updatedRecord.receiptNo})`,
+    recordId: updatedRecord.id
+  });
+
+  return newRecords;
+}
+
+export function deleteRecord(recordId: string, user: string, role: UserRole): AirtimeRecord[] {
+  const current = getStoredRecords();
+  const target = current.find(r => r.id === recordId);
+  const updated = current.filter(r => r.id !== recordId);
+  saveRecords(updated);
+
+  deleteDoc(doc(db, 'airtimeRecords', recordId)).catch(err => handleFirestoreError(err, OperationType.DELETE, `airtimeRecords/${recordId}`));
+
+  if (target) {
+    addAuditLog({
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      user,
+      role,
+      action: 'DELETE',
+      details: `Deleted record LU Receipt: ${target.receiptNo} (Beneficiary: ${target.beneficiaryName}, ₦${target.amount})`,
+      recordId
+    });
+  }
+
+  return updated;
+}
+
+// ================= AUDIT & BULK MSG METHODS =================
+
+export function getAuditLogs(): AuditLog[] {
+  try {
+    const raw = localStorage.getItem(AUDIT_LOGS_KEY);
+    if (!raw) {
+      localStorage.setItem(AUDIT_LOGS_KEY, JSON.stringify(INITIAL_AUDIT_LOGS));
+      return INITIAL_AUDIT_LOGS;
+    }
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error('Error reading audit logs:', err);
+    return INITIAL_AUDIT_LOGS;
+  }
+}
+
+export function addAuditLog(log: AuditLog): void {
+  try {
+    const current = getAuditLogs();
+    const updated = [log, ...current];
+    localStorage.setItem(AUDIT_LOGS_KEY, JSON.stringify(updated));
+  } catch (err) {
+    console.error('Error adding audit log:', err);
+  }
+
+  setDoc(doc(db, 'auditLogs', log.id), sanitizeForFirestore(log)).catch(err => handleFirestoreError(err, OperationType.WRITE, `auditLogs/${log.id}`));
+}
+
+export function getBulkMessageLogs(): BulkMessageLog[] {
+  try {
+    const raw = localStorage.getItem(BULK_MSG_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error('Error reading bulk message logs:', err);
+    return [];
+  }
+}
+
+export function addBulkMessageLog(log: BulkMessageLog): void {
+  try {
+    const current = getBulkMessageLogs();
+    const updated = [log, ...current];
+    localStorage.setItem(BULK_MSG_KEY, JSON.stringify(updated));
+  } catch (err) {
+    console.error('Error saving bulk message log:', err);
+  }
+
+  setDoc(doc(db, 'bulkMessageLogs', log.id), sanitizeForFirestore(log)).catch(err => handleFirestoreError(err, OperationType.WRITE, `bulkMessageLogs/${log.id}`));
+}
+
+export function getAdminPassword(): string {
+  return localStorage.getItem(ADMIN_PASS_KEY) || 'lightup2026';
+}
+
+export function setAdminPassword(newPass: string): void {
+  localStorage.setItem(ADMIN_PASS_KEY, newPass);
+}
+
+export function getCurrentUserRole(): UserRole {
+  return (localStorage.getItem(USER_ROLE_KEY) as UserRole) || 'Admin';
+}
+
+export function setCurrentUserRole(role: UserRole): void {
+  localStorage.setItem(USER_ROLE_KEY, role);
+}
+
+export function getCurrentUserName(): string {
+  const stored = localStorage.getItem(USER_NAME_KEY);
+  if (!stored || stored.includes('David') || stored.includes('Pastor David')) {
+    localStorage.setItem(USER_NAME_KEY, 'Bro Stephen');
+    return 'Bro Stephen';
+  }
+  return stored;
+}
+
+export function setCurrentUserName(name: string): void {
+  localStorage.setItem(USER_NAME_KEY, name);
+}
+
+export function exportBackupJSON(): string {
+  const data = {
+    app: 'LIGHT UP PRAYER HOUSE - FAMILY OUTREACH',
+    exportedAt: new Date().toISOString(),
+    records: getStoredRecords(),
+    beneficiaries: getBeneficiaries(),
+    attendanceSessions: getAttendanceSessions(),
+    auditLogs: getAuditLogs()
+  };
+  return JSON.stringify(data, null, 2);
+}
+
+export function importBackupJSON(jsonString: string): boolean {
+  try {
+    const parsed = JSON.parse(jsonString);
+    if (parsed && Array.isArray(parsed.records)) {
+      saveRecords(parsed.records);
+      if (Array.isArray(parsed.beneficiaries)) {
+        saveBeneficiaries(parsed.beneficiaries);
+        parsed.beneficiaries.forEach((b: Beneficiary) => setDoc(doc(db, 'beneficiaries', b.id), sanitizeForFirestore(b)));
+      }
+      if (Array.isArray(parsed.attendanceSessions)) {
+        localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(parsed.attendanceSessions));
+        parsed.attendanceSessions.forEach((s: AttendanceSession) => setDoc(doc(db, 'attendanceSessions', s.id), sanitizeForFirestore(s)));
+      }
+      if (Array.isArray(parsed.auditLogs)) {
+        localStorage.setItem(AUDIT_LOGS_KEY, JSON.stringify(parsed.auditLogs));
+      }
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.error('Invalid backup file:', err);
+    return false;
+  }
+}
+
+export function disburseAirtimeOneClick(
+  b: Beneficiary,
+  amount: number,
+  ministerName: string,
+  userRole: UserRole,
+  receiptNo: string,
+  evidenceSvgUrl?: string
+): { updatedRecords: AirtimeRecord[]; updatedBeneficiaries: Beneficiary[]; newRecord: AirtimeRecord } {
+  const now = new Date();
+  const todayStr = now.toISOString().split('T')[0];
+  const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+  const newRecord: AirtimeRecord = {
+    id: `rec-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    receiptNo,
+    beneficiaryName: b.fullName,
+    phoneNumber: b.phoneNumber,
+    network: b.network,
+    amount,
+    purpose: b.category,
+    distributionDate: todayStr,
+    distributionTime: timeStr,
+    distributedBy: ministerName || 'Ministry Volunteer',
+    notes: `⚡ 1-Click Airtime Dispatch to registered beneficiary (${b.notes || 'Outreach Member'})`,
+    evidenceUrl: evidenceSvgUrl,
+    evidenceName: `1click_transfer_${receiptNo}.png`,
+    evidenceType: 'image',
+    status: 'Verified',
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+  };
+
+  const updatedRecords = addRecord(newRecord, ministerName, userRole);
+
+  const beneficiaries = getBeneficiaries();
+  const bIndex = beneficiaries.findIndex(item => item.id === b.id || item.fullName.toLowerCase() === b.fullName.toLowerCase());
+  
+  if (bIndex !== -1) {
+    const targetB = beneficiaries[bIndex];
+    const updatedB = {
+      ...targetB,
+      totalReceivedAmount: (targetB.totalReceivedAmount || 0) + amount,
+      totalTransfersCount: (targetB.totalTransfersCount || 0) + 1,
+      lastDisbursedDate: todayStr
+    };
+    beneficiaries[bIndex] = updatedB;
+    saveBeneficiaries(beneficiaries);
+    setDoc(doc(db, 'beneficiaries', updatedB.id), sanitizeForFirestore(updatedB)).catch(err => handleFirestoreError(err, OperationType.WRITE, `beneficiaries/${updatedB.id}`));
+  }
+
+  return {
+    updatedRecords,
+    updatedBeneficiaries: beneficiaries,
+    newRecord
+  };
+}
