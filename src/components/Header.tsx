@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Flame, Shield, UserCheck, Wifi, WifiOff, Key, Database, BookOpen } from 'lucide-react';
 import { UserRole } from '../types';
+import { PWAInstallPrompt } from './PWAInstallPrompt';
 
 interface HeaderProps {
   currentRole: UserRole;
@@ -70,7 +71,10 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Right Controls & Role Badge */}
-          <div className="flex items-center justify-between sm:justify-end gap-2.5">
+          <div className="flex items-center justify-between sm:justify-end gap-2.5 flex-wrap">
+            {/* PWA Install Button */}
+            <PWAInstallPrompt />
+
             {/* Network Status Badge */}
             <div className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border ${isOnline ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' : 'bg-amber-500/20 text-amber-200 border-amber-500/40'}`}>
               {isOnline ? (
