@@ -75,7 +75,7 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
 ];
 
 export const INITIAL_REGISTERED_BENEFICIARIES: Beneficiary[] = [
-  // Leaders / Key Contacts
+  // Leaders / Key Contacts - Esther Group Benin
   {
     id: 'ebm-001',
     fullName: 'Sister Balogun AGL',

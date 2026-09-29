@@ -36,25 +36,33 @@ export const ProofModal: React.FC<ProofModalProps> = ({ imageUrl, onClose }) => 
 
             <button
               onClick={onClose}
-              className="p-1.5 rounded-xl bg-purple-900/80 hover:bg-rose-500 text-purple-300 hover:text-white transition-colors"
+              className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer border border-rose-400"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4 stroke-[3]" />
+              <span>Close Preview</span>
             </button>
           </div>
         </div>
 
         {/* High Res Image Display */}
-        <div className="rounded-2xl bg-black/60 p-2 border border-purple-800/60 max-h-[75vh] flex items-center justify-center overflow-auto">
+        <div className="rounded-2xl bg-black/60 p-2 border border-purple-800/60 max-h-[65vh] flex items-center justify-center overflow-auto">
           <img
             src={imageUrl}
             alt="Verifiable Transfer Evidence"
-            className="max-h-[70vh] w-auto object-contain rounded-xl shadow-lg"
+            className="max-h-[60vh] w-auto object-contain rounded-xl shadow-lg"
           />
         </div>
 
-        {/* Footer info */}
-        <div className="text-center text-[11px] text-purple-300/80">
-          Light Up Prayer House Family Outreach • Evidence preserved for audit transparency.
+        {/* Footer info & bottom close */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-purple-300/80 pt-2 border-t border-purple-800/60">
+          <div>Light Up Prayer House Family Outreach • Evidence preserved for audit transparency.</div>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs flex items-center gap-1.5 shrink-0"
+          >
+            <X className="w-4 h-4 stroke-[3]" />
+            <span>Close Preview</span>
+          </button>
         </div>
       </div>
     </div>

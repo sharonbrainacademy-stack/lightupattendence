@@ -1,12 +1,14 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Calendar, UserCheck, UserX, Clock, CheckCircle2, Search, Filter, Sparkles, MessageSquare, History, Plus, Save, Trash2, ArrowRight, ShieldCheck, Download, Upload, FileText, X, AlertCircle, HelpCircle, Check, Zap } from 'lucide-react';
-import { Beneficiary, AttendanceSession, AttendanceRecordItem, AttendanceStatus, UserRole } from '../types';
+import { Calendar, UserCheck, UserX, Clock, CheckCircle2, Search, Filter, Sparkles, MessageSquare, History, Plus, Save, Trash2, ArrowRight, ShieldCheck, Download, Upload, FileText, X, AlertCircle, HelpCircle, Check, Zap, ArrowRightLeft } from 'lucide-react';
+import { Beneficiary, AttendanceSession, AttendanceRecordItem, AttendanceStatus, UserRole, MinistryGroup } from '../types';
 
 interface AttendanceTrackerProps {
   beneficiaries: Beneficiary[];
   attendanceSessions: AttendanceSession[];
   currentRole: UserRole;
   currentUserName: string;
+  activeGroup?: MinistryGroup;
+  onOpenGroupSwitchModal?: () => void;
   onSaveSession: (session: AttendanceSession) => void;
   onDeleteSession: (id: string) => void;
   onUpdateBeneficiary?: (b: Beneficiary) => void;
@@ -18,6 +20,8 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
   attendanceSessions,
   currentRole,
   currentUserName,
+  activeGroup = 'Esther Group',
+  onOpenGroupSwitchModal,
   onSaveSession,
   onDeleteSession,
   onUpdateBeneficiary,
@@ -37,8 +41,19 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
   
   // Search & Filter within active marking sheet
   const [searchQuery, setSearchQuery] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
+  const [categoryFilter, setCategoryFilter] = useState<string>(
+    activeGroup === 'Peace Group' ? 'Peace Group' : 'ALL'
+  );
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
+
+  // Automatically sync category filter when activeGroup changes
+  useEffect(() => {
+    if (activeGroup === 'Peace Group') {
+      setCategoryFilter('Peace Group');
+    } else {
+      setCategoryFilter('ALL');
+    }
+  }, [activeGroup]);
 
   // Attendance Records State map: beneficiaryId -> AttendanceRecordItem
   const [recordsMap, setRecordsMap] = useState<Record<string, AttendanceRecordItem>>(() => {
@@ -654,11 +669,15 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
     return unique.sort((a, b) => {
       const aCat = a?.category || '';
       const bCat = b?.category || '';
-      const aIsEsther = aCat === 'Esther Group Benin' || aCat.toLowerCase().includes('esther');
-      const bIsEsther = bCat === 'Esther Group Benin' || bCat.toLowerCase().includes('esther');
+      const isGroupA = activeGroup === 'Peace Group'
+        ? (aCat === 'Peace Group' || aCat.toLowerCase().includes('peace'))
+        : (aCat === 'Esther Group Benin' || aCat.toLowerCase().includes('esther'));
+      const isGroupB = activeGroup === 'Peace Group'
+        ? (bCat === 'Peace Group' || bCat.toLowerCase().includes('peace'))
+        : (bCat === 'Esther Group Benin' || bCat.toLowerCase().includes('esther'));
 
-      if (aIsEsther && !bIsEsther) return -1;
-      if (!aIsEsther && bIsEsther) return 1;
+      if (isGroupA && !isGroupB) return -1;
+      if (!isGroupA && isGroupB) return 1;
 
       return (a?.fullName || '').localeCompare(b?.fullName || '');
     });
@@ -803,10 +822,14 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
       if (aIsPresent && !bIsPresent) return -1;
       if (!aIsPresent && bIsPresent) return 1;
 
-      const aIsEsther = (a.category || '').toLowerCase().includes('esther');
-      const bIsEsther = (b.category || '').toLowerCase().includes('esther');
-      if (aIsEsther && !bIsEsther) return -1;
-      if (!aIsEsther && bIsEsther) return 1;
+      const isGroupA = activeGroup === 'Peace Group'
+        ? (a.category || '').toLowerCase().includes('peace')
+        : (a.category || '').toLowerCase().includes('esther');
+      const isGroupB = activeGroup === 'Peace Group'
+        ? (b.category || '').toLowerCase().includes('peace')
+        : (b.category || '').toLowerCase().includes('esther');
+      if (isGroupA && !isGroupB) return -1;
+      if (!isGroupA && isGroupB) return 1;
 
       return a.fullName.localeCompare(b.fullName);
     });
@@ -891,10 +914,14 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
         if (aIsPresent && !bIsPresent) return -1;
         if (!aIsPresent && bIsPresent) return 1;
 
-        const aIsEsther = (a.category || '').toLowerCase().includes('esther');
-        const bIsEsther = (b.category || '').toLowerCase().includes('esther');
-        if (aIsEsther && !bIsEsther) return -1;
-        if (!aIsEsther && bIsEsther) return 1;
+        const isGroupA = activeGroup === 'Peace Group'
+          ? (a.category || '').toLowerCase().includes('peace')
+          : (a.category || '').toLowerCase().includes('esther');
+        const isGroupB = activeGroup === 'Peace Group'
+          ? (b.category || '').toLowerCase().includes('peace')
+          : (b.category || '').toLowerCase().includes('esther');
+        if (isGroupA && !isGroupB) return -1;
+        if (!isGroupA && isGroupB) return 1;
 
         return a.fullName.localeCompare(b.fullName);
       });
@@ -1244,7 +1271,20 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
       const searchLower = (searchQuery || '').toLowerCase();
 
       const matchesSearch = !searchLower || bName.includes(searchLower) || bPhone.includes(searchLower);
-      const matchesCategory = categoryFilter === 'ALL' || bCat === categoryFilter;
+      let matchesCategory = false;
+      if (categoryFilter === 'ALL') {
+        if (activeGroup === 'Peace Group') {
+          matchesCategory = bCat === 'Peace Group' || Boolean(b.notes && b.notes.toLowerCase().includes('peace'));
+        } else {
+          matchesCategory = bCat === 'Esther Group Benin' || Boolean(b.notes && b.notes.toLowerCase().includes('esther')) || (!bCat.toLowerCase().includes('peace') && !b.notes?.toLowerCase().includes('peace'));
+        }
+      } else if (categoryFilter === 'Esther Group Benin') {
+        matchesCategory = bCat === 'Esther Group Benin' || Boolean(b.notes && b.notes.toLowerCase().includes('esther'));
+      } else if (categoryFilter === 'Peace Group') {
+        matchesCategory = bCat === 'Peace Group' || Boolean(b.notes && b.notes.toLowerCase().includes('peace'));
+      } else {
+        matchesCategory = bCat === categoryFilter;
+      }
       const currentStatus = (recordsMap && recordsMap[b.id]) ? recordsMap[b.id].status : 'Absent';
       const matchesStatus = statusFilter === 'ALL' || currentStatus === statusFilter;
       return matchesSearch && matchesCategory && matchesStatus;
@@ -1253,15 +1293,19 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
     return list.sort((a, b) => {
       const aCat = a?.category || '';
       const bCat = b?.category || '';
-      const aIsEsther = aCat === 'Esther Group Benin' || aCat.toLowerCase().includes('esther');
-      const bIsEsther = bCat === 'Esther Group Benin' || bCat.toLowerCase().includes('esther');
+      const isGroupA = activeGroup === 'Peace Group'
+        ? (aCat === 'Peace Group' || aCat.toLowerCase().includes('peace'))
+        : (aCat === 'Esther Group Benin' || aCat.toLowerCase().includes('esther'));
+      const isGroupB = activeGroup === 'Peace Group'
+        ? (bCat === 'Peace Group' || bCat.toLowerCase().includes('peace'))
+        : (bCat === 'Esther Group Benin' || bCat.toLowerCase().includes('esther'));
 
-      if (aIsEsther && !bIsEsther) return -1;
-      if (!aIsEsther && bIsEsther) return 1;
+      if (isGroupA && !isGroupB) return -1;
+      if (!isGroupA && isGroupB) return 1;
 
       return (a?.fullName || '').localeCompare(b?.fullName || '');
     });
-  }, [beneficiaries, searchQuery, categoryFilter, statusFilter, recordsMap]);
+  }, [beneficiaries, searchQuery, categoryFilter, statusFilter, recordsMap, activeGroup]);
 
   // Statistics
   const stats = useMemo(() => {
@@ -1319,7 +1363,7 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
     const absentNames = absentList.map(r => r.fullName);
     
     onNavigateToBulkMsg(
-      targetCategory === 'Esther Group Benin' ? 'ESTHER_GROUP' : 'ABSENT_MEMBERS',
+      targetCategory === 'Peace Group' ? 'PEACE_GROUP' : targetCategory === 'Esther Group Benin' ? 'ESTHER_GROUP' : 'ABSENT_MEMBERS',
       absentPhones,
       absentNames
     );
@@ -1336,8 +1380,16 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
               <Calendar className="w-3.5 h-3.5 text-amber-400" />
               <span>Ministry Attendance &amp; Roll Call</span>
             </div>
-            <h2 className="text-2xl sm:text-3xl font-extrabold font-cinzel text-amber-100">
-              Daily Morning Devotional Attendance Register
+            <h2 className="text-2xl sm:text-3xl font-extrabold font-cinzel text-amber-100 flex items-center gap-3 flex-wrap">
+              <span>Daily Morning Devotional Attendance Register</span>
+              <span className={`text-xs px-3 py-1 rounded-full font-sans font-bold border flex items-center gap-1.5 ${
+                activeGroup === 'Peace Group'
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                  : 'bg-pink-500/20 text-pink-300 border border-pink-500/40'
+              }`}>
+                <span>{activeGroup === 'Peace Group' ? '🕊️' : '🌸'}</span>
+                <span>Active: {activeGroup}</span>
+              </span>
             </h2>
             <p className="text-xs sm:text-sm text-purple-200/90 max-w-2xl">
               Mark roll call attendance for Daily Morning Devotional Prayers, Sunday services, and special revival fellowships. Automatically follow up with absent members via WhatsApp &amp; SMS!
@@ -1345,6 +1397,17 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            {onOpenGroupSwitchModal && (
+              <button
+                onClick={onOpenGroupSwitchModal}
+                className="px-4 py-2.5 rounded-2xl bg-purple-900/80 hover:bg-purple-800 text-amber-300 border border-purple-600 text-xs font-bold flex items-center gap-1.5 shadow-lg cursor-pointer transition-all hover:scale-105"
+                title="Switch between Esther Group and Peace Group (Password Protected)"
+              >
+                <ArrowRightLeft className="w-3.5 h-3.5" />
+                <span>Switch Group ({activeGroup === 'Peace Group' ? 'Esther' : 'Peace'})</span>
+              </button>
+            )}
+
             <button
               onClick={() => setIsAutoMarkModalOpen(true)}
               className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-purple-950 font-extrabold text-xs flex items-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer border border-amber-300"
@@ -1396,6 +1459,17 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
 
             {stats.absent > 0 && (
               <div className="flex items-center gap-2 flex-wrap">
+                {stats.absentCategoryCounts['Peace Group'] && stats.absentCategoryCounts['Peace Group'] > 0 && (
+                  <button
+                    onClick={() => handleFollowUpAbsent('Peace Group')}
+                    className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white font-black text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-600/25 cursor-pointer border border-emerald-300"
+                    title="Send bulk follow-up to absent Peace Group members"
+                  >
+                    <MessageSquare className="w-4 h-4 text-white" />
+                    <span>🕊️ Follow-Up {stats.absentCategoryCounts['Peace Group']} Absent Peace Group Members</span>
+                  </button>
+                )}
+
                 {stats.absentCategoryCounts['Esther Group Benin'] && stats.absentCategoryCounts['Esther Group Benin'] > 0 && (
                   <button
                     onClick={() => handleFollowUpAbsent('Esther Group Benin')}
@@ -1884,7 +1958,8 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
             className="px-3 py-2.5 rounded-xl bg-purple-950/80 border border-purple-800 text-amber-200 text-xs font-bold"
           >
             <option value="ALL">All Categories</option>
-            <option value="Esther Group Benin">🌸 Esther Group Benin (Focus)</option>
+            <option value="Esther Group Benin">🌸 Esther Group Benin</option>
+            <option value="Peace Group">🕊️ Peace Group</option>
             <option value="Pastor / Minister Care">👑 Pastors &amp; Ministers</option>
             <option value="Widow Support">👵 Widows</option>
             <option value="Youth Outreach">🙌 Youth Choir</option>

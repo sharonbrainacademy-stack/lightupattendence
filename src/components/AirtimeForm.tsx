@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Phone, User, Calendar, CreditCard, FileCheck, Upload, Camera, Sparkles, Check, AlertCircle, Heart, X, Image as ImageIcon } from 'lucide-react';
-import { AirtimeRecord, NetworkType, PurposeCategory } from '../types';
+import { AirtimeRecord, NetworkType, PurposeCategory, MinistryGroup } from '../types';
 import { detectNigerianNetwork, getNetworkBadgeStyle, formatPhoneNumber } from '../utils/networkDetector';
 import { generateReceiptNumber } from '../utils/receiptGenerator';
 
 interface AirtimeFormProps {
   currentUserName: string;
+  activeGroup?: MinistryGroup;
   onSaveRecord: (record: AirtimeRecord) => void;
   onCancel?: () => void;
 }
@@ -13,6 +14,7 @@ interface AirtimeFormProps {
 const PRESET_AMOUNTS = [500, 1000, 2000, 5000, 10000];
 
 const PURPOSE_OPTIONS: PurposeCategory[] = [
+  'Peace Group',
   'Esther Group Benin',
   'Widow Support',
   'Youth Outreach',
@@ -26,6 +28,7 @@ const PURPOSE_OPTIONS: PurposeCategory[] = [
 
 export const AirtimeForm: React.FC<AirtimeFormProps> = ({
   currentUserName,
+  activeGroup = 'Esther Group',
   onSaveRecord,
   onCancel,
 }) => {
@@ -34,7 +37,9 @@ export const AirtimeForm: React.FC<AirtimeFormProps> = ({
   const [network, setNetwork] = useState<NetworkType>('Other');
   const [amount, setAmount] = useState<number | 'custom' | ''>(2000);
   const [customAmount, setCustomAmount] = useState('');
-  const [purpose, setPurpose] = useState<PurposeCategory>('Esther Group Benin');
+  const [purpose, setPurpose] = useState<PurposeCategory>(
+    activeGroup === 'Peace Group' ? 'Peace Group' : 'Esther Group Benin'
+  );
   const [customPurpose, setCustomPurpose] = useState('');
   const [distributionDate, setDistributionDate] = useState(() => {
     return new Date().toISOString().split('T')[0];

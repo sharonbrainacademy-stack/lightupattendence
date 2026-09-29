@@ -31,8 +31,15 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errMsg = error instanceof Error ? error.message : String(error);
+  // Gracefully handle offline network disconnections
+  if (errMsg.toLowerCase().includes('offline') || errMsg.toLowerCase().includes('unavailable') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+    console.warn(`[Firestore Offline Mode] Operation ${operationType} on ${path} will sync when connection is restored.`);
+    return;
+  }
+
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errMsg,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,

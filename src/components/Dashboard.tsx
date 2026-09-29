@@ -1,31 +1,55 @@
 import React from 'react';
-import { PlusCircle, FileText, Share2, Layers, Flame, ArrowUpRight, CheckCircle2, ShieldCheck, HeartHandshake, Users, PhoneCall, Sparkles, Zap, Calendar, MessageSquare } from 'lucide-react';
-import { AirtimeRecord, Beneficiary } from '../types';
+import { PlusCircle, FileText, Share2, Layers, Flame, ArrowUpRight, CheckCircle2, ShieldCheck, HeartHandshake, Users, PhoneCall, Sparkles, Zap, Calendar, MessageSquare, ArrowRightLeft } from 'lucide-react';
+import { AirtimeRecord, Beneficiary, MinistryGroup } from '../types';
 import { formatNaira } from '../utils/receiptGenerator';
 import { getNetworkBadgeStyle } from '../utils/networkDetector';
 
 interface DashboardProps {
   records: AirtimeRecord[];
   beneficiaries?: Beneficiary[];
+  activeGroup?: MinistryGroup;
+  isAuthenticated?: boolean;
+  onOpenGroupSwitchModal?: () => void;
   onNavigate: (tab: 'dashboard' | 'beneficiaries' | 'attendance' | 'bulk_msg' | 'distribution' | 'records' | 'reports') => void;
   onViewRecord: (record: AirtimeRecord) => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
   records,
+  beneficiaries = [],
+  activeGroup = 'Esther Group',
+  isAuthenticated = false,
+  onOpenGroupSwitchModal,
   onNavigate,
   onViewRecord,
 }) => {
-  const totalAmount = records.reduce((sum, r) => sum + r.amount, 0);
-  const totalBeneficiaries = new Set(records.map((r) => r.beneficiaryName.toLowerCase().trim())).size;
-  const recentRecords = records.slice(0, 5);
+  // Filter records and beneficiaries strictly for the active group
+  const groupRecords = records.filter(r => {
+    if (activeGroup === 'Peace Group') {
+      return r.purpose === 'Peace Group' || r.purpose.toLowerCase().includes('peace');
+    } else {
+      return r.purpose === 'Esther Group Benin' || r.purpose.toLowerCase().includes('esther') || (!r.purpose.toLowerCase().includes('peace'));
+    }
+  });
+
+  const groupBeneficiaries = beneficiaries.filter(b => {
+    if (activeGroup === 'Peace Group') {
+      return b.category === 'Peace Group' || b.notes?.toLowerCase().includes('peace');
+    } else {
+      return b.category === 'Esther Group Benin' || b.notes?.toLowerCase().includes('esther') || (!b.category.toLowerCase().includes('peace') && !b.notes?.toLowerCase().includes('peace'));
+    }
+  });
+
+  const totalAmount = groupRecords.reduce((sum, r) => sum + r.amount, 0);
+  const totalBeneficiaries = groupBeneficiaries.length;
+  const recentRecords = groupRecords.slice(0, 5);
 
   // Top purpose calculation
   const purposeCounts: Record<string, number> = {};
-  records.forEach((r) => {
+  groupRecords.forEach((r) => {
     purposeCounts[r.purpose] = (purposeCounts[r.purpose] || 0) + 1;
   });
-  let topPurpose = 'Widow Support';
+  let topPurpose = activeGroup === 'Peace Group' ? 'Peace Group' : 'Esther Group Benin';
   let maxCount = 0;
   Object.entries(purposeCounts).forEach(([purpose, count]) => {
     if (count > maxCount) {
@@ -75,6 +99,54 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Active Ministry Group Focus & Quick Switcher */}
+      <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md ${
+        activeGroup === 'Peace Group'
+          ? 'bg-gradient-to-r from-emerald-950/70 via-slate-900 to-purple-950 border-emerald-500/40 text-emerald-100'
+          : 'bg-gradient-to-r from-pink-950/70 via-slate-900 to-purple-950 border-pink-500/40 text-pink-100'
+      }`}>
+        <div className="flex items-center gap-3">
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl shadow-inner ${
+            activeGroup === 'Peace Group' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-pink-500/20 text-pink-300 border border-pink-500/40'
+          }`}>
+            {activeGroup === 'Peace Group' ? '🕊️' : '🌸'}
+          </div>
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider opacity-75">
+              Active Congregation Group
+            </div>
+            <div className="text-sm font-extrabold text-white flex items-center gap-2">
+              <span>{activeGroup}</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-900/80 text-amber-300 font-mono border border-purple-700">
+                {beneficiaries.filter(b => activeGroup === 'Peace Group' 
+                  ? (b.category === 'Peace Group' || b.notes?.includes('Peace')) 
+                  : (b.category === 'Esther Group Benin' || b.notes?.includes('Esther'))
+                ).length} Registered Members
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {onOpenGroupSwitchModal && (
+          <button
+            onClick={onOpenGroupSwitchModal}
+            className="px-4 py-2 rounded-xl bg-purple-900/70 hover:bg-purple-800 border border-purple-600 text-xs font-bold text-amber-300 hover:text-amber-200 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm hover:scale-[1.02]"
+          >
+            {isAuthenticated ? (
+              <>
+                <ArrowRightLeft className="w-3.5 h-3.5" />
+                <span>Switch Active Group</span>
+              </>
+            ) : (
+              <>
+                <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+                <span>🔐 Group Admin Login</span>
+              </>
+            )}
+          </button>
+        )}
       </div>
 
       {/* Quick Stats Grid */}

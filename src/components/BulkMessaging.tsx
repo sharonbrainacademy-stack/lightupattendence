@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Send, MessageSquare, Smartphone, Copy, Check, Users, Sparkles, Filter, Phone, CheckCircle2, ShieldCheck, Flame, RefreshCw } from 'lucide-react';
-import { Beneficiary, AttendanceSession, BulkMessageLog, UserRole } from '../types';
+import { Beneficiary, AttendanceSession, BulkMessageLog, UserRole, MinistryGroup } from '../types';
 import { getVTPassConfig } from '../utils/vtpassService';
 
 interface BulkMessagingProps {
@@ -8,6 +8,7 @@ interface BulkMessagingProps {
   attendanceSessions: AttendanceSession[];
   currentRole: UserRole;
   currentUserName: string;
+  activeGroup?: MinistryGroup;
   initialCategory?: string;
   initialPreSelectedPhones?: string[];
   initialPreSelectedNames?: string[];
@@ -19,6 +20,7 @@ export const BulkMessaging: React.FC<BulkMessagingProps> = ({
   attendanceSessions,
   currentRole,
   currentUserName,
+  activeGroup = 'Esther Group',
   initialCategory = 'ALL',
   initialPreSelectedPhones = [],
   initialPreSelectedNames = [],
@@ -71,6 +73,9 @@ export const BulkMessaging: React.FC<BulkMessagingProps> = ({
     } else if (audienceCategory === 'ESTHER_GROUP') {
       const estherMembers = beneficiaries.filter(b => b.category === 'Esther Group Benin' || b.notes?.includes('Esther Group'));
       setSelectedPhones(new Set(estherMembers.map(b => b.phoneNumber)));
+    } else if (audienceCategory === 'PEACE_GROUP') {
+      const peaceMembers = beneficiaries.filter(b => b.category === 'Peace Group' || b.notes?.includes('Peace'));
+      setSelectedPhones(new Set(peaceMembers.map(b => b.phoneNumber)));
     } else if (audienceCategory === 'PASTORS') {
       const pastors = beneficiaries.filter(b => b.category === 'Pastor / Minister Care');
       setSelectedPhones(new Set(pastors.map(b => b.phoneNumber)));
@@ -250,13 +255,28 @@ export const BulkMessaging: React.FC<BulkMessagingProps> = ({
                 onClick={() => setAudienceCategory('ESTHER_GROUP')}
                 className={`w-full p-3 rounded-xl text-xs font-bold flex items-center justify-between border cursor-pointer transition-all ${
                   audienceCategory === 'ESTHER_GROUP'
-                    ? 'bg-amber-500 text-purple-950 border-amber-400 font-extrabold shadow-md'
-                    : 'bg-purple-900/40 text-purple-200 border-purple-800 hover:text-amber-300'
+                    ? 'bg-gradient-to-r from-pink-500 to-pink-600 text-white border-pink-400 font-extrabold shadow-md'
+                    : 'bg-purple-900/40 text-purple-200 border-purple-800 hover:text-pink-300'
                 }`}
               >
-                <span>🔥 Esther Group Benin (Daily Prayer)</span>
+                <span>🌸 Esther Group Benin (Daily Prayer)</span>
                 <span className="px-2 py-0.5 rounded-full bg-purple-950/40 text-xs font-mono">
                   {beneficiaries.filter(b => b.category === 'Esther Group Benin' || b.notes?.includes('Esther Group')).length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAudienceCategory('PEACE_GROUP')}
+                className={`w-full p-3 rounded-xl text-xs font-bold flex items-center justify-between border cursor-pointer transition-all ${
+                  audienceCategory === 'PEACE_GROUP'
+                    ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white border-emerald-400 font-extrabold shadow-md'
+                    : 'bg-purple-900/40 text-purple-200 border-purple-800 hover:text-emerald-300'
+                }`}
+              >
+                <span>🕊️ Peace Group (Daily Prayer)</span>
+                <span className="px-2 py-0.5 rounded-full bg-purple-950/40 text-xs font-mono">
+                  {beneficiaries.filter(b => b.category === 'Peace Group' || b.notes?.includes('Peace')).length}
                 </span>
               </button>
 
@@ -347,6 +367,7 @@ export const BulkMessaging: React.FC<BulkMessagingProps> = ({
                 >
                   <option value="ALL">All Categories</option>
                   <option value="Esther Group Benin">🌸 Esther Group Benin</option>
+                  <option value="Peace Group">🕊️ Peace Group</option>
                   <option value="Pastor / Minister Care">👑 Pastors &amp; Ministers</option>
                   <option value="Widow Support">👵 Widows</option>
                   <option value="Youth Outreach">🙌 Youth Choir</option>

@@ -1,25 +1,37 @@
 import React, { useState, useMemo } from 'react';
 import { FileText, Printer, Download, Sparkles, Layers, ShieldCheck, TrendingUp, Users, HeartHandshake, PhoneCall, Award } from 'lucide-react';
-import { AirtimeRecord, NetworkType } from '../types';
+import { AirtimeRecord, NetworkType, MinistryGroup } from '../types';
 import { formatNaira } from '../utils/receiptGenerator';
 import { getNetworkBadgeStyle } from '../utils/networkDetector';
 
 interface ReportsSummaryProps {
   records: AirtimeRecord[];
+  activeGroup?: MinistryGroup;
 }
 
-export const ReportsSummary: React.FC<ReportsSummaryProps> = ({ records }) => {
+export const ReportsSummary: React.FC<ReportsSummaryProps> = ({ records, activeGroup = 'Esther Group' }) => {
   const [selectedPeriod, setSelectedPeriod] = useState<'ALL' | 'THIS_MONTH' | 'LAST_MONTH'>('ALL');
+
+  // Filter records by group first
+  const groupFilteredRecords = useMemo(() => {
+    return records.filter(r => {
+      if (activeGroup === 'Peace Group') {
+        return r.purpose === 'Peace Group' || r.purpose.toLowerCase().includes('peace');
+      } else {
+        return r.purpose === 'Esther Group Benin' || r.purpose.toLowerCase().includes('esther') || (!r.purpose.toLowerCase().includes('peace'));
+      }
+    });
+  }, [records, activeGroup]);
 
   // Filter records by period
   const periodRecords = useMemo(() => {
-    if (selectedPeriod === 'ALL') return records;
+    if (selectedPeriod === 'ALL') return groupFilteredRecords;
 
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth();
 
-    return records.filter((r) => {
+    return groupFilteredRecords.filter((r) => {
       const recDate = new Date(r.distributionDate);
       if (selectedPeriod === 'THIS_MONTH') {
         return recDate.getFullYear() === currentYear && recDate.getMonth() === currentMonth;

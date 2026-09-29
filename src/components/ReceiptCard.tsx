@@ -157,9 +157,11 @@ Distributed By: ${record.distributedBy}
           {onClose && (
             <button
               onClick={onClose}
-              className="p-1.5 rounded-xl bg-purple-900/80 hover:bg-rose-500 text-purple-300 hover:text-white transition-colors ml-1"
+              className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer border border-rose-400"
+              title="Close Preview"
             >
-              <X className="w-4 h-4" />
+              <X className="w-4 h-4 stroke-[3]" />
+              <span>Close Preview</span>
             </button>
           )}
         </div>
@@ -323,6 +325,18 @@ Distributed By: ${record.distributedBy}
         </div>
 
       </div>
+
+      {onClose && (
+        <div className="flex justify-center pt-2 pb-6 no-print">
+          <button
+            onClick={onClose}
+            className="px-6 py-3 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-sm flex items-center gap-2 shadow-xl transition-all cursor-pointer border border-rose-400"
+          >
+            <X className="w-5 h-5 stroke-[3]" />
+            <span>Close Preview</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 };

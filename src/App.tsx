@@ -11,7 +11,8 @@ import { BulkMessaging } from './components/BulkMessaging';
 import { AdminModal } from './components/AdminModal';
 import { ProofModal } from './components/ProofModal';
 import { Footer } from './components/Footer';
-import { AirtimeRecord, UserRole, AuditLog, Beneficiary, AttendanceSession, BulkMessageLog } from './types';
+import { AirtimeRecord, UserRole, AuditLog, Beneficiary, AttendanceSession, BulkMessageLog, MinistryGroup } from './types';
+import { GroupSwitchModal } from './components/GroupSwitchModal';
 import {
   getStoredRecords,
   addRecord,
@@ -21,6 +22,8 @@ import {
   setCurrentUserRole,
   getCurrentUserName,
   setCurrentUserName,
+  getActiveGroup,
+  setActiveGroup,
   getBeneficiaries,
   addBeneficiary,
   updateBeneficiary,
@@ -102,10 +105,44 @@ export default function App() {
   const [currentRole, setRoleState] = useState<UserRole>('Admin');
   const [currentUserName, setUserNameState] = useState<string>('Bro Stephen');
 
+  // Active Ministry Group State (Esther Group vs Peace Group)
+  const [activeGroup, setActiveGroupState] = useState<MinistryGroup>(() => getActiveGroup());
+  const [authenticatedGroup, setAuthenticatedGroup] = useState<MinistryGroup | null>(null);
+  const [pendingTab, setPendingTab] = useState<'beneficiaries' | 'attendance' | 'bulk_msg' | 'distribution' | null>(null);
+  const [isGroupSwitchModalOpen, setIsGroupSwitchModalOpen] = useState(false);
+
   // Modal states
   const [selectedReceiptRecord, setSelectedReceiptRecord] = useState<AirtimeRecord | null>(null);
   const [selectedProofUrl, setSelectedProofUrl] = useState<string | null>(null);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+
+  const isAuthenticated = authenticatedGroup !== null;
+
+  const handleGroupSwitched = (newGroup: MinistryGroup) => {
+    setActiveGroupState(newGroup);
+    setAuthenticatedGroup(newGroup);
+    setActiveGroup(newGroup);
+    if (pendingTab) {
+      setActiveTab(pendingTab);
+      setPendingTab(null);
+    }
+  };
+
+  const handleLogout = () => {
+    setAuthenticatedGroup(null);
+    setActiveTab('dashboard');
+  };
+
+  const handleSelectTab = (tab: 'dashboard' | 'beneficiaries' | 'attendance' | 'bulk_msg' | 'distribution' | 'records' | 'reports') => {
+    const protectedTabs = ['beneficiaries', 'attendance', 'bulk_msg', 'distribution'];
+    if (protectedTabs.includes(tab) && !isAuthenticated) {
+      setPendingTab(tab as any);
+      setIsGroupSwitchModalOpen(true);
+      return;
+    }
+    setSelectedReceiptRecord(null);
+    setActiveTab(tab);
+  };
 
   // Load initial state and subscribe to real-time Cloud Firestore updates
   useEffect(() => {
@@ -248,11 +285,12 @@ export default function App() {
       <Header
         currentRole={currentRole}
         userName={currentUserName}
+        activeGroup={activeGroup}
+        isAuthenticated={isAuthenticated}
+        onOpenGroupSwitchModal={() => setIsGroupSwitchModalOpen(true)}
         onOpenAdminModal={() => setIsAdminModalOpen(true)}
-        onSelectTab={(tab) => {
-          setSelectedReceiptRecord(null);
-          setActiveTab(tab);
-        }}
+        onLogout={handleLogout}
+        onSelectTab={handleSelectTab}
         activeTab={activeTab}
       />
 
@@ -280,7 +318,10 @@ export default function App() {
               <Dashboard
                 records={records}
                 beneficiaries={beneficiaries}
-                onNavigate={(tab) => setActiveTab(tab)}
+                activeGroup={activeGroup}
+                isAuthenticated={isAuthenticated}
+                onOpenGroupSwitchModal={() => setIsGroupSwitchModalOpen(true)}
+                onNavigate={handleSelectTab}
                 onViewRecord={(rec) => setSelectedReceiptRecord(rec)}
               />
             )}
@@ -290,6 +331,8 @@ export default function App() {
                 beneficiaries={beneficiaries}
                 currentRole={currentRole}
                 currentUserName={currentUserName}
+                activeGroup={activeGroup}
+                onOpenGroupSwitchModal={() => setIsGroupSwitchModalOpen(true)}
                 onOneClickDispatch={handleOneClickDispatch}
                 onAddBeneficiary={handleAddBeneficiary}
                 onUpdateBeneficiary={handleUpdateBeneficiary}
@@ -304,6 +347,8 @@ export default function App() {
                   attendanceSessions={attendanceSessions}
                   currentRole={currentRole}
                   currentUserName={currentUserName}
+                  activeGroup={activeGroup}
+                  onOpenGroupSwitchModal={() => setIsGroupSwitchModalOpen(true)}
                   onSaveSession={handleSaveAttendanceSession}
                   onDeleteSession={handleDeleteAttendanceSession}
                   onUpdateBeneficiary={handleUpdateBeneficiary}
@@ -318,6 +363,7 @@ export default function App() {
                 attendanceSessions={attendanceSessions}
                 currentRole={currentRole}
                 currentUserName={currentUserName}
+                activeGroup={activeGroup}
                 initialCategory={bulkMsgTargetCategory}
                 initialPreSelectedPhones={bulkMsgPrePhones}
                 initialPreSelectedNames={bulkMsgPreNames}
@@ -328,6 +374,7 @@ export default function App() {
             {activeTab === 'distribution' && (
               <AirtimeForm
                 currentUserName={currentUserName}
+                activeGroup={activeGroup}
                 onSaveRecord={handleSaveRecord}
                 onCancel={() => setActiveTab('dashboard')}
               />
@@ -338,6 +385,7 @@ export default function App() {
                 records={records}
                 currentRole={currentRole}
                 currentUserName={currentUserName}
+                activeGroup={activeGroup}
                 onViewRecord={(rec) => setSelectedReceiptRecord(rec)}
                 onDeleteRecord={handleDeleteRecord}
                 onNewDistribution={() => setActiveTab('distribution')}
@@ -346,7 +394,7 @@ export default function App() {
             )}
 
             {activeTab === 'reports' && (
-              <ReportsSummary records={records} />
+              <ReportsSummary records={records} activeGroup={activeGroup} />
             )}
           </>
         )}
@@ -354,6 +402,15 @@ export default function App() {
       </main>
 
       {/* Modals */}
+      <GroupSwitchModal
+        isOpen={isGroupSwitchModalOpen}
+        onClose={() => setIsGroupSwitchModalOpen(false)}
+        currentGroup={activeGroup}
+        isAuthenticated={isAuthenticated}
+        onGroupSwitched={handleGroupSwitched}
+        onOpenAdminSettings={() => setIsAdminModalOpen(true)}
+      />
+
       {isAdminModalOpen && (
         <AdminModal
           currentRole={currentRole}

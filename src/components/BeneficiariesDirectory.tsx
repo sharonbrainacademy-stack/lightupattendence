@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { Users, UserPlus, Zap, Search, Phone, Heart, CreditCard, Sparkles, CheckCircle2, PhoneCall, ArrowRight, X, Edit2, Trash2, ShieldCheck, Loader2 } from 'lucide-react';
-import { Beneficiary, NetworkType, PurposeCategory, UserRole } from '../types';
+import { Users, UserPlus, Zap, Search, Phone, Heart, CreditCard, Sparkles, CheckCircle2, PhoneCall, ArrowRight, X, Edit2, Trash2, ShieldCheck, Loader2, ArrowRightLeft } from 'lucide-react';
+import { Beneficiary, NetworkType, PurposeCategory, UserRole, MinistryGroup } from '../types';
 import { detectNigerianNetwork, getNetworkBadgeStyle, formatPhoneNumber, getUSSDTransferCode } from '../utils/networkDetector';
 import { generateReceiptNumber, formatNaira } from '../utils/receiptGenerator';
 import { executeVTPassAirtimeTopup } from '../utils/vtpassService';
@@ -9,6 +9,8 @@ interface BeneficiariesDirectoryProps {
   beneficiaries: Beneficiary[];
   currentRole: UserRole;
   currentUserName: string;
+  activeGroup?: MinistryGroup;
+  onOpenGroupSwitchModal?: () => void;
   onOneClickDispatch: (
     beneficiary: Beneficiary,
     amount: number,
@@ -22,6 +24,7 @@ interface BeneficiariesDirectoryProps {
 }
 
 const CATEGORY_OPTIONS: PurposeCategory[] = [
+  'Peace Group',
   'Esther Group Benin',
   'Widow Support',
   'Youth Outreach',
@@ -37,6 +40,8 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
   beneficiaries,
   currentRole,
   currentUserName,
+  activeGroup = 'Esther Group',
+  onOpenGroupSwitchModal,
   onOneClickDispatch,
   onAddBeneficiary,
   onUpdateBeneficiary,
@@ -44,8 +49,19 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [memberToDelete, setMemberToDelete] = useState<Beneficiary | null>(null);
-  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
+  const [selectedCategory, setSelectedCategory] = useState<string>(
+    activeGroup === 'Peace Group' ? 'Peace Group' : 'ALL'
+  );
   const [selectedNetwork, setSelectedNetwork] = useState<string>('ALL');
+
+  // Automatically update selected category when active group changes
+  React.useEffect(() => {
+    if (activeGroup === 'Peace Group') {
+      setSelectedCategory('Peace Group');
+    } else {
+      setSelectedCategory('ALL');
+    }
+  }, [activeGroup]);
 
   // General & Individual Airtime Amount States
   const [generalAmount, setGeneralAmount] = useState<number>(2000);
@@ -108,7 +124,9 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [newNetwork, setNewNetwork] = useState<NetworkType>('Other');
-  const [newCategory, setNewCategory] = useState<PurposeCategory>('Esther Group Benin');
+  const [newCategory, setNewCategory] = useState<PurposeCategory>(
+    activeGroup === 'Peace Group' ? 'Peace Group' : 'Esther Group Benin'
+  );
   const [newDefaultAmount, setNewDefaultAmount] = useState<number>(2000);
   const [newNotes, setNewNotes] = useState('');
   const [newZoomName, setNewZoomName] = useState('');
@@ -119,7 +137,9 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editNetwork, setEditNetwork] = useState<NetworkType>('Other');
-  const [editCategory, setEditCategory] = useState<PurposeCategory>('Esther Group Benin');
+  const [editCategory, setEditCategory] = useState<PurposeCategory>(
+    activeGroup === 'Peace Group' ? 'Peace Group' : 'Esther Group Benin'
+  );
   const [editDefaultAmount, setEditDefaultAmount] = useState<number>(2000);
   const [editNotes, setEditNotes] = useState('');
   const [editZoomName, setEditZoomName] = useState('');
@@ -163,12 +183,14 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
     }
   };
 
-  // Helper to detect ESG (Esther Group) tag and auto-assign Esther Group Benin category without altering user-entered name
+  // Helper to detect ESG / PG tags and auto-assign group category without altering user-entered name
   const cleanESGNameAndCategory = (rawName: string, currentCat: PurposeCategory) => {
     const cleanName = rawName.trim();
     let cat = currentCat;
 
-    if (/\b(esg|esther group)\b/i.test(cleanName) && currentCat === 'Other / Custom') {
+    if (/\b(peace|pg|peace group)\b/i.test(cleanName) && (currentCat === 'Other / Custom' || currentCat === 'Esther Group Benin')) {
+      cat = 'Peace Group';
+    } else if (/\b(esg|esther group)\b/i.test(cleanName) && (currentCat === 'Other / Custom' || currentCat === 'Peace Group')) {
       cat = 'Esther Group Benin';
     }
 
@@ -228,19 +250,41 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
     }
   };
 
+  // Active Group Members list
+  const activeGroupMembers = useMemo(() => {
+    return beneficiaries.filter((b) => {
+      if (activeGroup === 'Peace Group') {
+        return b.category === 'Peace Group' || Boolean(b.notes && b.notes.toLowerCase().includes('peace'));
+      } else {
+        return b.category === 'Esther Group Benin' || Boolean(b.notes && b.notes.toLowerCase().includes('esther')) || (!b.category.toLowerCase().includes('peace') && !b.notes?.toLowerCase().includes('peace'));
+      }
+    });
+  }, [beneficiaries, activeGroup]);
+
   // Filter beneficiaries
   const filteredBeneficiaries = useMemo(() => {
-    return beneficiaries.filter((b) => {
+    return activeGroupMembers.filter((b) => {
       const matchesSearch =
         b.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         b.phoneNumber.includes(searchTerm) ||
         b.category.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesCategory = selectedCategory === 'ALL' || b.category === selectedCategory;
+
+      let matchesCategory = false;
+      if (selectedCategory === 'ALL') {
+        matchesCategory = true;
+      } else if (selectedCategory === 'Esther Group Benin') {
+        matchesCategory = b.category === 'Esther Group Benin' || Boolean(b.notes && b.notes.toLowerCase().includes('esther'));
+      } else if (selectedCategory === 'Peace Group') {
+        matchesCategory = b.category === 'Peace Group' || Boolean(b.notes && b.notes.toLowerCase().includes('peace'));
+      } else {
+        matchesCategory = b.category === selectedCategory;
+      }
+
       const matchesNetwork = selectedNetwork === 'ALL' || b.network === selectedNetwork;
 
       return matchesSearch && matchesCategory && matchesNetwork;
     });
-  }, [beneficiaries, searchTerm, selectedCategory, selectedNetwork]);
+  }, [activeGroupMembers, searchTerm, selectedCategory, selectedNetwork]);
 
   // Open 1-Click Modal
   const handleOpenDispatchModal = (b: Beneficiary) => {
@@ -376,7 +420,7 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
           <h2 className="text-xl sm:text-2xl font-extrabold font-cinzel text-white flex items-center gap-2">
             <span>👥 Registered Beneficiaries Directory</span>
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-purple-800 text-amber-300 font-sans border border-purple-700">
-              {beneficiaries.length} Registered
+              {activeGroupMembers.length} Registered ({activeGroup})
             </span>
           </h2>
           <p className="text-xs text-amber-200/80">
@@ -393,6 +437,42 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
         </button>
       </div>
 
+      {/* Active Group Indicator & Switcher Banner */}
+      <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md ${
+        activeGroup === 'Peace Group'
+          ? 'bg-gradient-to-r from-emerald-950/70 to-slate-950 border-emerald-500/40 text-emerald-100'
+          : 'bg-gradient-to-r from-pink-950/70 to-slate-950 border-pink-500/40 text-pink-100'
+      }`}>
+        <div className="flex items-center gap-3">
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl shadow-inner ${
+            activeGroup === 'Peace Group' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-pink-500/20 text-pink-300 border border-pink-500/40'
+          }`}>
+            {activeGroup === 'Peace Group' ? '🕊️' : '🌸'}
+          </div>
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider opacity-75">
+              Active Congregation Focus
+            </div>
+            <div className="text-sm font-extrabold text-white flex items-center gap-2">
+              <span>{activeGroup}</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-900/80 text-amber-300 font-mono border border-purple-700">
+                {activeGroupMembers.length} Registered Members
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {onOpenGroupSwitchModal && (
+          <button
+            onClick={onOpenGroupSwitchModal}
+            className="px-3.5 py-2 rounded-xl bg-purple-900/70 hover:bg-purple-800 border border-purple-600 text-xs font-bold text-amber-300 hover:text-amber-200 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm hover:scale-[1.02]"
+          >
+            <ArrowRightLeft className="w-3.5 h-3.5" />
+            <span>Switch Group (Password)</span>
+          </button>
+        )}
+      </div>
+
       {/* Filter & Search Bar */}
       <div className="p-5 rounded-2xl bg-purple-950/60 border border-purple-800/50 space-y-4 backdrop-blur-md">
         
@@ -406,8 +486,40 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
                 : 'bg-purple-900/50 text-purple-200 hover:bg-purple-900 border border-purple-800/60'
             }`}
           >
-            All Members ({beneficiaries.length})
+            All Members ({filteredBeneficiaries.length})
           </button>
+
+          {activeGroup === 'Esther Group' && (
+            <button
+              onClick={() => setSelectedCategory('Esther Group Benin')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-extrabold shrink-0 transition-all flex items-center gap-1.5 ${
+                selectedCategory === 'Esther Group Benin'
+                  ? 'bg-gradient-to-r from-pink-500 to-pink-600 text-white shadow-lg shadow-pink-500/20'
+                  : 'bg-pink-500/10 text-pink-300 border border-pink-500/40 hover:bg-pink-500/20'
+              }`}
+            >
+              <span>🌸 Esther Group</span>
+              <span className="px-1.5 py-0.2 bg-purple-950/80 text-pink-300 rounded-md text-[10px]">
+                {beneficiaries.filter(b => b.category === 'Esther Group Benin' || b.notes?.toLowerCase().includes('esther')).length}
+              </span>
+            </button>
+          )}
+
+          {activeGroup === 'Peace Group' && (
+            <button
+              onClick={() => setSelectedCategory('Peace Group')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-extrabold shrink-0 transition-all flex items-center gap-1.5 ${
+                selectedCategory === 'Peace Group'
+                  ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-lg shadow-emerald-500/20'
+                  : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/20'
+              }`}
+            >
+              <span>🕊️ Peace Group</span>
+              <span className="px-1.5 py-0.2 bg-purple-950/80 text-emerald-300 rounded-md text-[10px]">
+                {beneficiaries.filter(b => b.category === 'Peace Group' || b.notes?.toLowerCase().includes('peace')).length}
+              </span>
+            </button>
+          )}
 
           <button
             onClick={() => setSelectedCategory('Pastor / Minister Care')}

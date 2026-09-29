@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Shield, Key, Lock, UserCheck, Database, FileText, Download, Upload, Check, AlertCircle, X, History, Sparkles, CreditCard, RefreshCw } from 'lucide-react';
 import { UserRole, AuditLog } from '../types';
-import { getAdminPassword, setAdminPassword, exportBackupJSON, importBackupJSON } from '../utils/storage';
+import { getAdminPassword, setAdminPassword, getGroupPasswords, setGroupPasswords, exportBackupJSON, importBackupJSON } from '../utils/storage';
 import { getVTPassConfig, saveVTPassConfig, VTPassConfig } from '../utils/vtpassService';
 
 interface AdminModalProps {
@@ -81,6 +81,21 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   // Change Password State
   const [newPassword, setNewPassword] = useState('');
   const [passChangedMsg, setPassChangedMsg] = useState('');
+
+  // Group Passwords State (Esther Group & Peace Group)
+  const [estherGroupPass, setEstherGroupPass] = useState(() => getGroupPasswords().estherPassword);
+  const [peaceGroupPass, setPeaceGroupPass] = useState(() => getGroupPasswords().peacePassword);
+  const [groupPassChangedMsg, setGroupPassChangedMsg] = useState('');
+
+  const handleUpdateGroupPasswords = (e: React.FormEvent) => {
+    e.preventDefault();
+    setGroupPasswords({
+      estherPassword: estherGroupPass,
+      peacePassword: peaceGroupPass,
+    });
+    setGroupPassChangedMsg('Group switch passwords updated successfully!');
+    setTimeout(() => setGroupPassChangedMsg(''), 3000);
+  };
 
   // Role Form
   const [selectedRole, setSelectedRole] = useState<UserRole>(currentRole);
@@ -375,6 +390,63 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
               {passChangedMsg && (
                 <div className="text-xs text-emerald-400 font-semibold">{passChangedMsg}</div>
+              )}
+            </form>
+
+            {/* Group Switch Passwords Form */}
+            <form onSubmit={handleUpdateGroupPasswords} className="space-y-3 p-4 rounded-2xl bg-purple-900/30 border border-amber-500/40">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="block text-xs font-bold uppercase text-amber-300">
+                    Group Switch Passwords (Esther &amp; Peace Group)
+                  </label>
+                  <p className="text-[11px] text-purple-200/80 mt-0.5">
+                    Permit admins to switch between Esther Group and Peace Group using individual passwords or master admin password.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div>
+                  <label className="block text-[11px] font-semibold text-pink-300 mb-1 flex items-center gap-1">
+                    <span>🌸 Esther Group Switch Password</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={estherGroupPass}
+                    onChange={(e) => setEstherGroupPass(e.target.value)}
+                    placeholder="default: esther2026"
+                    className="w-full px-3 py-2 rounded-xl bg-purple-950 border border-purple-700 text-white text-xs font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-emerald-300 mb-1 flex items-center gap-1">
+                    <span>🕊️ Peace Group Switch Password</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={peaceGroupPass}
+                    onChange={(e) => setPeaceGroupPass(e.target.value)}
+                    placeholder="default: peace2026"
+                    className="w-full px-3 py-2 rounded-xl bg-purple-950 border border-purple-700 text-white text-xs font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-[10px] text-purple-300">
+                  Note: The Admin Master Password (<code className="text-amber-300">lightup2026</code>) can always unlock both groups.
+                </span>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-purple-950 font-bold text-xs shadow-md cursor-pointer transition-all"
+                >
+                  Save Group Passwords
+                </button>
+              </div>
+
+              {groupPassChangedMsg && (
+                <div className="text-xs text-emerald-400 font-semibold">{groupPassChangedMsg}</div>
               )}
             </form>
           </div>

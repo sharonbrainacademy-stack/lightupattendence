@@ -35,10 +35,16 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
+  // Do not attempt to cache Firebase WebSocket or API calls
+  const url = new URL(event.request.url);
+  if (url.hostname.includes('firestore.googleapis.com') || url.hostname.includes('firebaseio.com') || url.pathname.includes('/api/')) {
+    return;
+  }
+
   event.respondWith(
     fetch(event.request)
       .then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200) {
+        if (networkResponse && (networkResponse.status === 200 || networkResponse.type === 'opaque')) {
           const responseClone = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
             cache.put(event.request, responseClone);

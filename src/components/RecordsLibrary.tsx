@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Search, Filter, Download, FileSpreadsheet, FileText, Printer, Trash2, Edit3, Eye, ShieldCheck, CheckCircle2, Phone, Calendar, ArrowUpDown, PlusCircle, AlertCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
-import { AirtimeRecord, NetworkType, UserRole } from '../types';
+import { AirtimeRecord, NetworkType, UserRole, MinistryGroup } from '../types';
 import { formatNaira } from '../utils/receiptGenerator';
 import { getNetworkBadgeStyle } from '../utils/networkDetector';
 
@@ -10,6 +10,7 @@ interface RecordsLibraryProps {
   records: AirtimeRecord[];
   currentRole: UserRole;
   currentUserName: string;
+  activeGroup?: MinistryGroup;
   onViewRecord: (record: AirtimeRecord) => void;
   onEditRecord?: (record: AirtimeRecord) => void;
   onDeleteRecord: (recordId: string) => void;
@@ -21,6 +22,7 @@ export const RecordsLibrary: React.FC<RecordsLibraryProps> = ({
   records,
   currentRole,
   currentUserName,
+  activeGroup = 'Esther Group',
   onViewRecord,
   onEditRecord,
   onDeleteRecord,
@@ -38,6 +40,16 @@ export const RecordsLibrary: React.FC<RecordsLibraryProps> = ({
   const filteredRecords = useMemo(() => {
     return records
       .filter((rec) => {
+        // Strict group filtering
+        if (activeGroup === 'Peace Group') {
+          if (rec.purpose !== 'Peace Group' && !rec.purpose.toLowerCase().includes('peace')) {
+            return false;
+          }
+        } else {
+          if (rec.purpose === 'Peace Group' || rec.purpose.toLowerCase().includes('peace')) {
+            return false;
+          }
+        }
         const matchesSearch =
           rec.beneficiaryName.toLowerCase().includes(searchTerm.toLowerCase()) ||
           rec.phoneNumber.includes(searchTerm) ||

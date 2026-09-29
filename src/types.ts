@@ -1,6 +1,15 @@
 export type NetworkType = 'MTN' | 'Glo' | 'Airtel' | '9Mobile' | 'Other';
 
+export type MinistryGroup = 'Esther Group' | 'Peace Group';
+
+export interface GroupPasswordsConfig {
+  estherPassword?: string;
+  peacePassword?: string;
+}
+
 export type PurposeCategory = 
+  | 'Esther Group Benin'
+  | 'Peace Group'
   | 'Widow Support' 
   | 'Youth Outreach' 
   | 'Elderly Care' 

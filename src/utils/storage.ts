@@ -1,4 +1,4 @@
-import { AirtimeRecord, AuditLog, UserRole, Beneficiary, AttendanceSession, BulkMessageLog } from '../types';
+import { AirtimeRecord, AuditLog, UserRole, Beneficiary, AttendanceSession, BulkMessageLog, MinistryGroup } from '../types';
 import { INITIAL_SAMPLE_RECORDS, INITIAL_AUDIT_LOGS, INITIAL_REGISTERED_BENEFICIARIES } from './sampleData';
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
@@ -37,6 +37,8 @@ const BULK_MSG_KEY = 'lu_prayer_house_bulk_msg_v1';
 const ADMIN_PASS_KEY = 'lu_prayer_house_admin_pass_v1';
 const USER_ROLE_KEY = 'lu_prayer_house_user_role_v1';
 const USER_NAME_KEY = 'lu_prayer_house_user_name_v1';
+const ACTIVE_GROUP_KEY = 'lu_prayer_house_active_group_v1';
+const GROUP_PASSWORDS_KEY = 'lu_prayer_house_group_passwords_v1';
 
 let isSeedingBeneficiaries = false;
 let isSeedingAttendance = false;
@@ -650,6 +652,57 @@ export function getAdminPassword(): string {
 
 export function setAdminPassword(newPass: string): void {
   localStorage.setItem(ADMIN_PASS_KEY, newPass);
+}
+
+export function getActiveGroup(): MinistryGroup {
+  const stored = localStorage.getItem(ACTIVE_GROUP_KEY);
+  if (stored === 'Peace Group' || stored === 'Esther Group') {
+    return stored as MinistryGroup;
+  }
+  return 'Esther Group';
+}
+
+export function setActiveGroup(group: MinistryGroup): void {
+  localStorage.setItem(ACTIVE_GROUP_KEY, group);
+}
+
+export function getGroupPasswords(): { estherPassword: string; peacePassword: string } {
+  try {
+    const stored = localStorage.getItem(GROUP_PASSWORDS_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      return {
+        estherPassword: parsed.estherPassword || 'esther2026',
+        peacePassword: parsed.peacePassword || 'peace2026',
+      };
+    }
+  } catch (e) {
+    console.error('Error reading group passwords', e);
+  }
+  return {
+    estherPassword: 'esther2026',
+    peacePassword: 'peace2026',
+  };
+}
+
+export function setGroupPasswords(passwords: { estherPassword?: string; peacePassword?: string }): void {
+  const current = getGroupPasswords();
+  const updated = {
+    estherPassword: passwords.estherPassword ? passwords.estherPassword.trim() : current.estherPassword,
+    peacePassword: passwords.peacePassword ? passwords.peacePassword.trim() : current.peacePassword,
+  };
+  localStorage.setItem(GROUP_PASSWORDS_KEY, JSON.stringify(updated));
+}
+
+export function verifyGroupSwitchPassword(targetGroup: MinistryGroup, inputPass: string): boolean {
+  const trimmed = inputPass.trim();
+  if (!trimmed) return false;
+  const adminPass = getAdminPassword();
+  const groupPasses = getGroupPasswords();
+  const targetPass = targetGroup === 'Peace Group' ? groupPasses.peacePassword : groupPasses.estherPassword;
+
+  // Verify against target group password, or master admin password (including default)
+  return trimmed === targetPass || trimmed === adminPass || trimmed === 'lightup2026';
 }
 
 export function getCurrentUserRole(): UserRole {
