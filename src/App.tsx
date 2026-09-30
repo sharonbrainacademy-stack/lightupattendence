@@ -314,7 +314,7 @@ export default function App() {
           </div>
         ) : (
           <>
-            {activeTab === 'dashboard' && (
+            <div className={activeTab === 'dashboard' ? 'block' : 'hidden'}>
               <Dashboard
                 records={records}
                 beneficiaries={beneficiaries}
@@ -324,9 +324,9 @@ export default function App() {
                 onNavigate={handleSelectTab}
                 onViewRecord={(rec) => setSelectedReceiptRecord(rec)}
               />
-            )}
+            </div>
 
-            {activeTab === 'beneficiaries' && (
+            <div className={activeTab === 'beneficiaries' ? 'block' : 'hidden'}>
               <BeneficiariesDirectory
                 beneficiaries={beneficiaries}
                 currentRole={currentRole}
@@ -338,9 +338,9 @@ export default function App() {
                 onUpdateBeneficiary={handleUpdateBeneficiary}
                 onDeleteBeneficiary={handleDeleteBeneficiary}
               />
-            )}
+            </div>
 
-            {activeTab === 'attendance' && (
+            <div className={activeTab === 'attendance' ? 'block' : 'hidden'}>
               <ErrorBoundary>
                 <AttendanceTracker
                   beneficiaries={beneficiaries}
@@ -355,9 +355,9 @@ export default function App() {
                   onNavigateToBulkMsg={handleNavigateToBulkMsg}
                 />
               </ErrorBoundary>
-            )}
+            </div>
 
-            {activeTab === 'bulk_msg' && (
+            <div className={activeTab === 'bulk_msg' ? 'block' : 'hidden'}>
               <BulkMessaging
                 beneficiaries={beneficiaries}
                 attendanceSessions={attendanceSessions}
@@ -369,18 +369,18 @@ export default function App() {
                 initialPreSelectedNames={bulkMsgPreNames}
                 onLogMessage={handleLogBulkMessage}
               />
-            )}
+            </div>
 
-            {activeTab === 'distribution' && (
+            <div className={activeTab === 'distribution' ? 'block' : 'hidden'}>
               <AirtimeForm
                 currentUserName={currentUserName}
                 activeGroup={activeGroup}
                 onSaveRecord={handleSaveRecord}
                 onCancel={() => setActiveTab('dashboard')}
               />
-            )}
+            </div>
 
-            {activeTab === 'records' && (
+            <div className={activeTab === 'records' ? 'block' : 'hidden'}>
               <RecordsLibrary
                 records={records}
                 currentRole={currentRole}
@@ -391,11 +391,11 @@ export default function App() {
                 onNewDistribution={() => setActiveTab('distribution')}
                 onOpenProofModal={(img) => setSelectedProofUrl(img)}
               />
-            )}
+            </div>
 
-            {activeTab === 'reports' && (
+            <div className={activeTab === 'reports' ? 'block' : 'hidden'}>
               <ReportsSummary records={records} activeGroup={activeGroup} />
-            )}
+            </div>
           </>
         )}
 

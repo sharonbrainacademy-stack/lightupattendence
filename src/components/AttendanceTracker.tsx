@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Calendar, UserCheck, UserX, Clock, CheckCircle2, Search, Filter, Sparkles, MessageSquare, History, Plus, Save, Trash2, ArrowRight, ShieldCheck, Download, Upload, FileText, X, AlertCircle, HelpCircle, Check, Zap, ArrowRightLeft } from 'lucide-react';
+import { jsPDF } from 'jspdf';
 import { Beneficiary, AttendanceSession, AttendanceRecordItem, AttendanceStatus, UserRole, MinistryGroup } from '../types';
 
 interface AttendanceTrackerProps {
@@ -57,6 +58,18 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
 
   // Attendance Records State map: beneficiaryId -> AttendanceRecordItem
   const [recordsMap, setRecordsMap] = useState<Record<string, AttendanceRecordItem>>(() => {
+    try {
+      const savedDraft = localStorage.getItem(`lightup_attendance_draft_${activeGroup}`);
+      if (savedDraft) {
+        const parsed = JSON.parse(savedDraft);
+        if (parsed && parsed.recordsMap && Object.keys(parsed.recordsMap).length > 0) {
+          return parsed.recordsMap;
+        }
+      }
+    } catch (e) {
+      console.warn('Draft load ignored');
+    }
+
     const initialMap: Record<string, AttendanceRecordItem> = {};
     beneficiaries.forEach(b => {
       initialMap[b.id] = {
@@ -70,6 +83,27 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
     });
     return initialMap;
   });
+
+  // Auto-save working attendance draft to LocalStorage
+  useEffect(() => {
+    if (Object.keys(recordsMap).length > 0) {
+      try {
+        const draft = {
+          selectedSessionId,
+          serviceDate,
+          serviceName,
+          serviceType,
+          notes,
+          recordsMap,
+          activeGroup,
+          timestamp: new Date().toISOString()
+        };
+        localStorage.setItem(`lightup_attendance_draft_${activeGroup}`, JSON.stringify(draft));
+      } catch (err) {
+        // ignore
+      }
+    }
+  }, [recordsMap, serviceDate, serviceName, serviceType, notes, selectedSessionId, activeGroup]);
 
   const [saveNotification, setSaveNotification] = useState<string | null>(null);
 
@@ -652,13 +686,22 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
     document.body.removeChild(link);
   };
 
-  // Deduplication helper to ensure all registered members are preserved (Esther Group members FIRST!)
+  // Deduplication helper to ensure all registered members are preserved (Filtered strictly by active group)
   const getDeduplicatedBeneficiaries = (list: Beneficiary[]): Beneficiary[] => {
     const seen = new Set<string>();
     const unique: Beneficiary[] = [];
 
     (list || []).forEach(b => {
       if (!b || !b.id) return;
+
+      if (activeGroup === 'Peace Group') {
+        const isPeace = b.category === 'Peace Group' || Boolean(b.notes && b.notes.toLowerCase().includes('peace'));
+        if (!isPeace) return;
+      } else {
+        const isEsther = b.category === 'Esther Group Benin' || Boolean(b.notes && b.notes.toLowerCase().includes('esther')) || (!b.category.toLowerCase().includes('peace') && !b.notes?.toLowerCase().includes('peace'));
+        if (!isEsther) return;
+      }
+
       const key = b.id;
       if (!seen.has(key)) {
         seen.add(key);
@@ -666,21 +709,7 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
       }
     });
 
-    return unique.sort((a, b) => {
-      const aCat = a?.category || '';
-      const bCat = b?.category || '';
-      const isGroupA = activeGroup === 'Peace Group'
-        ? (aCat === 'Peace Group' || aCat.toLowerCase().includes('peace'))
-        : (aCat === 'Esther Group Benin' || aCat.toLowerCase().includes('esther'));
-      const isGroupB = activeGroup === 'Peace Group'
-        ? (bCat === 'Peace Group' || bCat.toLowerCase().includes('peace'))
-        : (bCat === 'Esther Group Benin' || bCat.toLowerCase().includes('esther'));
-
-      if (isGroupA && !isGroupB) return -1;
-      if (!isGroupA && isGroupB) return 1;
-
-      return (a?.fullName || '').localeCompare(b?.fullName || '');
-    });
+    return unique.sort((a, b) => (a?.fullName || '').localeCompare(b?.fullName || ''));
   };
 
   // 1. Export Matrix Grid CSV (1 Row per Unique Member, Meeting Dates in Columns)
@@ -688,9 +717,12 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
     const uniqueMembers = getDeduplicatedBeneficiaries(beneficiaries);
     const effectiveSessions = getEffectiveAttendanceSessions();
     const sortedSessions = [...effectiveSessions].sort((a, b) => a.serviceDate.localeCompare(b.serviceDate));
+    const groupTitleName = activeGroup === 'Peace Group' ? 'PEACE GROUP' : 'ESTHER GROUP BENIN';
+    const fileGroupName = activeGroup === 'Peace Group' ? 'Peace_Group' : 'Esther_Group_Benin';
 
     const titleBlock = [
-      `"","LIGHT UP PRAYER HOUSE — ATTENDANCE REGISTER MATRIX"`,
+      `"","LIGHT UP PRAYER HOUSE — ${groupTitleName} ATTENDANCE REGISTER MATRIX"`,
+      `"","MINISTRY GROUP: ${groupTitleName}"`,
       `"","Export Date: ${todayStr} | Total Registered Members: ${uniqueMembers.length} | Total Recorded Meetings: ${sortedSessions.length}"`,
       ''
     ];
@@ -789,13 +821,15 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
       totalRateRow.join(',')
     ].join('\n');
 
-    downloadCSVFile(fullCSVContent, `LightUp_Attendance_Register_Matrix_${todayStr}.csv`);
+    downloadCSVFile(fullCSVContent, `LightUp_${fileGroupName}_Attendance_Register_Matrix_${todayStr}.csv`);
     setIsExportModalOpen(false);
   };
 
   // 2. Export Active Session Roll Call CSV (Present Members Listed First, Absent Members Below)
   const handleExportActiveSessionCSV = () => {
     const allMembers = getDeduplicatedBeneficiaries(beneficiaries);
+    const groupTitleName = activeGroup === 'Peace Group' ? 'PEACE GROUP' : 'ESTHER GROUP BENIN';
+    const fileGroupName = activeGroup === 'Peace Group' ? 'Peace_Group' : 'Esther_Group_Benin';
     
     const sessionRecords: AttendanceRecordItem[] = allMembers.map(m => {
       const rec = recordsMap[m.id] || {
@@ -822,15 +856,6 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
       if (aIsPresent && !bIsPresent) return -1;
       if (!aIsPresent && bIsPresent) return 1;
 
-      const isGroupA = activeGroup === 'Peace Group'
-        ? (a.category || '').toLowerCase().includes('peace')
-        : (a.category || '').toLowerCase().includes('esther');
-      const isGroupB = activeGroup === 'Peace Group'
-        ? (b.category || '').toLowerCase().includes('peace')
-        : (b.category || '').toLowerCase().includes('esther');
-      if (isGroupA && !isGroupB) return -1;
-      if (!isGroupA && isGroupB) return 1;
-
       return a.fullName.localeCompare(b.fullName);
     });
 
@@ -841,7 +866,8 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
     const rate = sessionRecords.length > 0 ? Math.round((totalPresent / sessionRecords.length) * 100) : 0;
 
     const titleBlock = [
-      `"","LIGHT UP PRAYER HOUSE — SESSION ATTENDANCE REGISTER"`,
+      `"","LIGHT UP PRAYER HOUSE — ${groupTitleName} SESSION ATTENDANCE REGISTER"`,
+      `"","MINISTRY GROUP: ${groupTitleName}"`,
       `"","Service Date: ${serviceDate} | Service Type: ${serviceType} | Program: ${serviceName.replace(/"/g, '""')}"`,
       `"","Recorded By: ${currentUserName} | Total Registered Members: ${sessionRecords.length} | Present: ${totalPresent} | Absent: ${aCount} | Attendance Rate: ${rate}%"`,
       ''
@@ -867,7 +893,7 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
       ...rows.map(row => row.join(','))
     ].join('\n');
 
-    downloadCSVFile(csvContent, `LightUp_Attendance_${serviceDate}_${serviceType.replace(/\s+/g, '_')}.csv`);
+    downloadCSVFile(csvContent, `LightUp_${fileGroupName}_Attendance_${serviceDate}_${serviceType.replace(/\s+/g, '_')}.csv`);
     setIsExportModalOpen(false);
   };
 
@@ -876,6 +902,8 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
     const effectiveSessions = getEffectiveAttendanceSessions();
     const sortedSessions = [...effectiveSessions].sort((a, b) => b.serviceDate.localeCompare(a.serviceDate));
     const allMembers = getDeduplicatedBeneficiaries(beneficiaries);
+    const groupTitleName = activeGroup === 'Peace Group' ? 'PEACE GROUP' : 'ESTHER GROUP BENIN';
+    const fileGroupName = activeGroup === 'Peace Group' ? 'Peace_Group' : 'Esther_Group_Benin';
 
     if (sortedSessions.length === 0) {
       handleExportActiveSessionCSV();
@@ -883,7 +911,8 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
     }
 
     const lines: string[] = [
-      `"","LIGHT UP PRAYER HOUSE — MASTER ATTENDANCE HISTORY LOG"`,
+      `"","LIGHT UP PRAYER HOUSE — ${groupTitleName} MASTER ATTENDANCE HISTORY LOG"`,
+      `"","MINISTRY GROUP: ${groupTitleName}"`,
       `"","Exported: ${todayStr} | Total Registered Members: ${allMembers.length} | Total Recorded Sessions: ${sortedSessions.length}"`,
       ''
     ];
@@ -914,22 +943,13 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
         if (aIsPresent && !bIsPresent) return -1;
         if (!aIsPresent && bIsPresent) return 1;
 
-        const isGroupA = activeGroup === 'Peace Group'
-          ? (a.category || '').toLowerCase().includes('peace')
-          : (a.category || '').toLowerCase().includes('esther');
-        const isGroupB = activeGroup === 'Peace Group'
-          ? (b.category || '').toLowerCase().includes('peace')
-          : (b.category || '').toLowerCase().includes('esther');
-        if (isGroupA && !isGroupB) return -1;
-        if (!isGroupA && isGroupB) return 1;
-
         return a.fullName.localeCompare(b.fullName);
       });
 
       const pCount = sessionRecords.filter(r => r.status === 'Present' || r.status === 'Late').length;
       const rate = sessionRecords.length > 0 ? Math.round((pCount / sessionRecords.length) * 100) : 0;
 
-      lines.push(`"","=== MEETING DATE: ${session.serviceDate} | Service: ${session.serviceType} (${session.serviceName.replace(/,/g, ' ')}) | Recorded By: ${session.recordedBy} | Total Registered: ${sessionRecords.length} | Present: ${pCount}/${sessionRecords.length} (${rate}%) ==="`);
+      lines.push(`"","=== MINISTRY GROUP: ${groupTitleName} | MEETING DATE: ${session.serviceDate} | Service: ${session.serviceType} (${session.serviceName.replace(/,/g, ' ')}) | Recorded By: ${session.recordedBy} | Total Registered: ${sessionRecords.length} | Present: ${pCount}/${sessionRecords.length} (${rate}%) ==="`);
       lines.push('S/N,Member Full Name,Phone Number,Status');
 
       sessionRecords.forEach((r, idx) => {
@@ -944,7 +964,7 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
       lines.push('');
     });
 
-    downloadCSVFile(lines.join('\n'), `LightUp_Master_Attendance_History_${todayStr}.csv`);
+    downloadCSVFile(lines.join('\n'), `LightUp_${fileGroupName}_Master_Attendance_History_${todayStr}.csv`);
     setIsExportModalOpen(false);
   };
 
@@ -952,9 +972,12 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
   const handleExportMemberSummaryCSV = () => {
     const uniqueMembers = getDeduplicatedBeneficiaries(beneficiaries);
     const effectiveSessions = getEffectiveAttendanceSessions();
+    const groupTitleName = activeGroup === 'Peace Group' ? 'PEACE GROUP' : 'ESTHER GROUP BENIN';
+    const fileGroupName = activeGroup === 'Peace Group' ? 'Peace_Group' : 'Esther_Group_Benin';
 
     const titleBlock = [
-      `"","LIGHT UP PRAYER HOUSE — MEMBER ATTENDANCE TRACEABILITY SUMMARY"`,
+      `"","LIGHT UP PRAYER HOUSE — ${groupTitleName} MEMBER ATTENDANCE TRACEABILITY SUMMARY"`,
+      `"","MINISTRY GROUP: ${groupTitleName}"`,
       `"","Exported: ${todayStr} | Total Registered Members: ${uniqueMembers.length} | Total Service Sessions Held: ${effectiveSessions.length}"`,
       ''
     ];
@@ -1010,7 +1033,256 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
       ...rows.map(row => row.join(','))
     ].join('\n');
 
-    downloadCSVFile(csvContent, `LightUp_Member_Attendance_Summary_${todayStr}.csv`);
+    downloadCSVFile(csvContent, `LightUp_${fileGroupName}_Member_Attendance_Summary_${todayStr}.csv`);
+    setIsExportModalOpen(false);
+  };
+
+  // 5. Export Active Session PDF Format Report
+  const handleExportActiveSessionPDF = () => {
+    const allMembers = getDeduplicatedBeneficiaries(beneficiaries);
+    const groupTitleName = activeGroup === 'Peace Group' ? 'PEACE GROUP' : 'ESTHER GROUP BENIN';
+    const fileGroupName = activeGroup === 'Peace Group' ? 'Peace_Group' : 'Esther_Group_Benin';
+
+    const sessionRecords: AttendanceRecordItem[] = allMembers.map(m => {
+      const rec = recordsMap[m.id] || {
+        beneficiaryId: m.id,
+        fullName: m.fullName,
+        phoneNumber: m.phoneNumber,
+        status: 'Absent'
+      };
+      return {
+        beneficiaryId: m.id,
+        fullName: m.fullName ? m.fullName.trim() : 'Member',
+        phoneNumber: m.phoneNumber ? m.phoneNumber.trim() : '',
+        category: m.category,
+        status: rec.status,
+        checkInTime: rec.checkInTime
+      };
+    });
+
+    sessionRecords.sort((a, b) => {
+      const aIsPresent = a.status === 'Present' || a.status === 'Late';
+      const bIsPresent = b.status === 'Present' || b.status === 'Late';
+      if (aIsPresent && !bIsPresent) return -1;
+      if (!aIsPresent && bIsPresent) return 1;
+      return a.fullName.localeCompare(b.fullName);
+    });
+
+    const pCount = sessionRecords.filter(r => r.status === 'Present').length;
+    const lCount = sessionRecords.filter(r => r.status === 'Late').length;
+    const aCount = sessionRecords.filter(r => r.status === 'Absent').length;
+    const totalPresent = pCount + lCount;
+    const rate = sessionRecords.length > 0 ? Math.round((totalPresent / sessionRecords.length) * 100) : 0;
+
+    const pdf = new jsPDF('portrait', 'mm', 'a4');
+
+    // Header Banner
+    pdf.setFillColor(88, 28, 135);
+    pdf.rect(0, 0, 210, 28, 'F');
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(13);
+    pdf.setTextColor(255, 255, 255);
+    pdf.text('LIGHT UP PRAYER HOUSE — FAMILY OUTREACH', 14, 11);
+
+    pdf.setFontSize(10);
+    pdf.setTextColor(253, 224, 71);
+    pdf.text(`MINISTRY GROUP: ${groupTitleName} ATTENDANCE REGISTER`, 14, 20);
+
+    // Metadata
+    pdf.setTextColor(30, 41, 59);
+    pdf.setFontSize(9);
+    pdf.setFont('helvetica', 'bold');
+
+    let y = 35;
+    pdf.text(`Program Title: ${serviceName}`, 14, y);
+    pdf.text(`Service Type: ${serviceType}`, 120, y);
+    y += 6;
+    pdf.text(`Service Date: ${serviceDate}`, 14, y);
+    pdf.text(`Recorded By: ${currentUserName}`, 120, y);
+    y += 6;
+
+    // Summary Box
+    pdf.setFillColor(243, 232, 255);
+    pdf.rect(14, y, 182, 10, 'F');
+    pdf.setFontSize(8.5);
+    pdf.setTextColor(88, 28, 135);
+    pdf.text(`Total Registered: ${sessionRecords.length}   |   Present: ${totalPresent}   |   Absent: ${aCount}   |   Attendance Rate: ${rate}%`, 18, y + 6.5);
+    y += 14;
+
+    // Table Header
+    pdf.setFillColor(107, 33, 168);
+    pdf.rect(14, y, 182, 7, 'F');
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(8);
+
+    pdf.text('S/N', 17, y + 5);
+    pdf.text('Member Full Name', 32, y + 5);
+    pdf.text('Phone Number', 115, y + 5);
+    pdf.text('Attendance Status', 160, y + 5);
+
+    y += 9;
+    pdf.setFont('helvetica', 'normal');
+    pdf.setTextColor(15, 23, 42);
+
+    sessionRecords.forEach((r, idx) => {
+      if (y > 275) {
+        pdf.addPage();
+        y = 15;
+        pdf.setFillColor(107, 33, 168);
+        pdf.rect(14, y, 182, 7, 'F');
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(8);
+        pdf.text('S/N', 17, y + 5);
+        pdf.text('Member Full Name', 32, y + 5);
+        pdf.text('Phone Number', 115, y + 5);
+        pdf.text('Attendance Status', 160, y + 5);
+        y += 9;
+        pdf.setFont('helvetica', 'normal');
+        pdf.setTextColor(15, 23, 42);
+      }
+
+      if (idx % 2 === 1) {
+        pdf.setFillColor(248, 250, 252);
+        pdf.rect(14, y - 4, 182, 6, 'F');
+      }
+
+      pdf.text((idx + 1).toString(), 17, y);
+      pdf.text(r.fullName.substring(0, 38), 32, y);
+      pdf.text(r.phoneNumber || '-', 115, y);
+
+      if (r.status === 'Present' || r.status === 'Late') {
+        pdf.setTextColor(5, 150, 105);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text(`PRESENT`, 160, y);
+        pdf.setFont('helvetica', 'normal');
+        pdf.setTextColor(15, 23, 42);
+      } else {
+        pdf.setTextColor(225, 29, 72);
+        pdf.text(`ABSENT`, 160, y);
+        pdf.setTextColor(15, 23, 42);
+      }
+
+      y += 6;
+    });
+
+    pdf.save(`LightUp_${fileGroupName}_Attendance_${serviceDate}.pdf`);
+    setIsExportModalOpen(false);
+  };
+
+  // 6. Export Member Traceability Summary PDF
+  const handleExportMemberSummaryPDF = () => {
+    const uniqueMembers = getDeduplicatedBeneficiaries(beneficiaries);
+    const effectiveSessions = getEffectiveAttendanceSessions();
+    const groupTitleName = activeGroup === 'Peace Group' ? 'PEACE GROUP' : 'ESTHER GROUP BENIN';
+    const fileGroupName = activeGroup === 'Peace Group' ? 'Peace_Group' : 'Esther_Group_Benin';
+
+    const pdf = new jsPDF('portrait', 'mm', 'a4');
+
+    // Header Banner
+    pdf.setFillColor(88, 28, 135);
+    pdf.rect(0, 0, 210, 28, 'F');
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(13);
+    pdf.setTextColor(255, 255, 255);
+    pdf.text('LIGHT UP PRAYER HOUSE — FAMILY OUTREACH', 14, 11);
+
+    pdf.setFontSize(10);
+    pdf.setTextColor(253, 224, 71);
+    pdf.text(`MINISTRY GROUP: ${groupTitleName} MEMBER ATTENDANCE SUMMARY`, 14, 20);
+
+    let y = 35;
+    pdf.setFontSize(9);
+    pdf.setTextColor(30, 41, 59);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text(`Export Date: ${todayStr}`, 14, y);
+    pdf.text(`Total Registered Members: ${uniqueMembers.length}`, 80, y);
+    pdf.text(`Total Meetings Held: ${effectiveSessions.length}`, 150, y);
+    y += 8;
+
+    // Table Header
+    pdf.setFillColor(107, 33, 168);
+    pdf.rect(14, y, 182, 7, 'F');
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(8);
+
+    pdf.text('S/N', 16, y + 5);
+    pdf.text('Member Full Name', 28, y + 5);
+    pdf.text('Phone Number', 90, y + 5);
+    pdf.text('Meetings', 122, y + 5);
+    pdf.text('Present', 142, y + 5);
+    pdf.text('Absent', 162, y + 5);
+    pdf.text('Rate (%)', 180, y + 5);
+
+    y += 9;
+    pdf.setFont('helvetica', 'normal');
+    pdf.setTextColor(15, 23, 42);
+
+    uniqueMembers.forEach((member, index) => {
+      let presentCount = 0;
+      let absentCount = 0;
+
+      effectiveSessions.forEach(session => {
+        const rec = session.records.find(r => r.beneficiaryId === member.id || r.fullName.toLowerCase().trim() === member.fullName.toLowerCase().trim());
+        if (rec) {
+          if (rec.status === 'Present' || rec.status === 'Late') presentCount++;
+          else if (rec.status === 'Absent') absentCount++;
+        }
+      });
+
+      const totalHeld = effectiveSessions.length;
+      const rate = totalHeld > 0 ? Math.round((presentCount / totalHeld) * 100) : 0;
+
+      if (y > 275) {
+        pdf.addPage();
+        y = 15;
+        pdf.setFillColor(107, 33, 168);
+        pdf.rect(14, y, 182, 7, 'F');
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(8);
+        pdf.text('S/N', 16, y + 5);
+        pdf.text('Member Full Name', 28, y + 5);
+        pdf.text('Phone Number', 90, y + 5);
+        pdf.text('Meetings', 122, y + 5);
+        pdf.text('Present', 142, y + 5);
+        pdf.text('Absent', 162, y + 5);
+        pdf.text('Rate (%)', 180, y + 5);
+        y += 9;
+        pdf.setFont('helvetica', 'normal');
+        pdf.setTextColor(15, 23, 42);
+      }
+
+      if (index % 2 === 1) {
+        pdf.setFillColor(248, 250, 252);
+        pdf.rect(14, y - 4, 182, 6, 'F');
+      }
+
+      pdf.text((index + 1).toString(), 16, y);
+      pdf.text(member.fullName.substring(0, 30), 28, y);
+      pdf.text(member.phoneNumber || '-', 90, y);
+      pdf.text(totalHeld.toString(), 125, y);
+      pdf.text(presentCount.toString(), 145, y);
+      pdf.text(absentCount.toString(), 165, y);
+
+      pdf.setFont('helvetica', 'bold');
+      if (rate >= 75) pdf.setTextColor(5, 150, 105);
+      else if (rate >= 50) pdf.setTextColor(217, 119, 6);
+      else pdf.setTextColor(225, 29, 72);
+
+      pdf.text(`${rate}%`, 182, y);
+
+      pdf.setFont('helvetica', 'normal');
+      pdf.setTextColor(15, 23, 42);
+
+      y += 6;
+    });
+
+    pdf.save(`LightUp_${fileGroupName}_Member_Summary_${todayStr}.pdf`);
     setIsExportModalOpen(false);
   };
 
@@ -1871,6 +2143,15 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
 
           <div className="flex items-center gap-2">
             <button
+              onClick={handleExportActiveSessionPDF}
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white border border-purple-400 font-extrabold text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
+              title="Download PDF report for this session"
+            >
+              <FileText className="w-3.5 h-3.5 text-amber-300" />
+              <span>Export Session PDF</span>
+            </button>
+
+            <button
               onClick={handleExportActiveSessionCSV}
               className="px-3.5 py-2 rounded-xl bg-purple-900/80 hover:bg-purple-800 text-amber-300 border border-purple-700 font-extrabold text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
               title="Download CSV for this session"
@@ -2639,24 +2920,33 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
                 </button>
               </div>
 
-              {/* 2. Active Session CSV */}
+              {/* 2. Active Session PDF & CSV */}
               <div className="p-4 rounded-2xl bg-purple-900/40 border border-purple-700/80 hover:border-purple-600 space-y-3 flex flex-col justify-between transition-all">
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2 text-indigo-300 font-extrabold text-sm">
                     <Calendar className="w-4 h-4 text-indigo-400" />
-                    <span>📋 Active Meeting Roll Call CSV</span>
+                    <span>📋 Active Meeting Roll Call Report</span>
                   </div>
                   <p className="text-[11px] text-purple-200/80 leading-normal">
-                    Downloads the active meeting session ({serviceDate}) register with a clean metadata header banner and a single deduplicated row per member.
+                    Downloads the active meeting session ({serviceDate}) register with group header banner and clean member attendance table.
                   </p>
                 </div>
-                <button
-                  onClick={handleExportActiveSessionCSV}
-                  className="w-full py-2.5 px-3 rounded-xl bg-purple-900 hover:bg-purple-800 text-indigo-200 font-bold text-xs flex items-center justify-center gap-1.5 border border-purple-700 cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5 text-indigo-300" />
-                  <span>Download Active Session</span>
-                </button>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    onClick={handleExportActiveSessionPDF}
+                    className="flex-1 py-2.5 px-3 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer border border-purple-400"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-amber-300" />
+                    <span>Export PDF</span>
+                  </button>
+                  <button
+                    onClick={handleExportActiveSessionCSV}
+                    className="flex-1 py-2.5 px-3 rounded-xl bg-purple-900 hover:bg-purple-800 text-indigo-200 font-bold text-xs flex items-center justify-center gap-1.5 border border-purple-700 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5 text-indigo-300" />
+                    <span>Export CSV</span>
+                  </button>
+                </div>
               </div>
 
               {/* 3. Master History Log CSV */}
@@ -2664,7 +2954,7 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2 text-emerald-300 font-extrabold text-sm">
                     <History className="w-4 h-4 text-emerald-400" />
-                    <span>📅 Master Session History Log CSV</span>
+                    <span>📅 Master Session History Log</span>
                   </div>
                   <p className="text-[11px] text-purple-200/80 leading-normal">
                     Organizes past recorded sessions into clean date sections, listing deduplicated member attendance records for each meeting date.
@@ -2675,28 +2965,37 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
                   className="w-full py-2.5 px-3 rounded-xl bg-purple-900 hover:bg-purple-800 text-emerald-200 font-bold text-xs flex items-center justify-center gap-1.5 border border-purple-700 cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5 text-emerald-300" />
-                  <span>Download Master History</span>
+                  <span>Download Master History CSV</span>
                 </button>
               </div>
 
-              {/* 4. Member Traceability Ledger CSV */}
+              {/* 4. Member Traceability Ledger PDF & CSV */}
               <div className="p-4 rounded-2xl bg-purple-900/40 border border-purple-700/80 hover:border-purple-600 space-y-3 flex flex-col justify-between transition-all">
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2 text-cyan-300 font-extrabold text-sm">
                     <UserCheck className="w-4 h-4 text-cyan-400" />
-                    <span>👤 Member Summary Ledger CSV</span>
+                    <span>👤 Member Attendance Summary Report</span>
                   </div>
                   <p className="text-[11px] text-purple-200/80 leading-normal">
-                    Unique member stats ledger listing all registered members with their total meeting attendance count, percentage rate (%), and dates attended.
+                    Unique member stats ledger listing all registered members with their total meeting attendance count, percentage rate (%), and attendance history.
                   </p>
                 </div>
-                <button
-                  onClick={handleExportMemberSummaryCSV}
-                  className="w-full py-2.5 px-3 rounded-xl bg-purple-900 hover:bg-purple-800 text-cyan-200 font-bold text-xs flex items-center justify-center gap-1.5 border border-purple-700 cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5 text-cyan-300" />
-                  <span>Download Member Summary</span>
-                </button>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    onClick={handleExportMemberSummaryPDF}
+                    className="flex-1 py-2.5 px-3 rounded-xl bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer border border-cyan-400"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-amber-300" />
+                    <span>Export PDF</span>
+                  </button>
+                  <button
+                    onClick={handleExportMemberSummaryCSV}
+                    className="flex-1 py-2.5 px-3 rounded-xl bg-purple-900 hover:bg-purple-800 text-cyan-200 font-bold text-xs flex items-center justify-center gap-1.5 border border-purple-700 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5 text-cyan-300" />
+                    <span>Export CSV</span>
+                  </button>
+                </div>
               </div>
 
             </div>
