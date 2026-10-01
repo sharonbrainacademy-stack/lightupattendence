@@ -1545,11 +1545,7 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
       const matchesSearch = !searchLower || bName.includes(searchLower) || bPhone.includes(searchLower);
       let matchesCategory = false;
       if (categoryFilter === 'ALL') {
-        if (activeGroup === 'Peace Group') {
-          matchesCategory = bCat === 'Peace Group' || Boolean(b.notes && b.notes.toLowerCase().includes('peace'));
-        } else {
-          matchesCategory = bCat === 'Esther Group Benin' || Boolean(b.notes && b.notes.toLowerCase().includes('esther')) || (!bCat.toLowerCase().includes('peace') && !b.notes?.toLowerCase().includes('peace'));
-        }
+        matchesCategory = true;
       } else if (categoryFilter === 'Esther Group Benin') {
         matchesCategory = bCat === 'Esther Group Benin' || Boolean(b.notes && b.notes.toLowerCase().includes('esther'));
       } else if (categoryFilter === 'Peace Group') {

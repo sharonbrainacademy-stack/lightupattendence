@@ -253,13 +253,17 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
   // Active Group Members list
   const activeGroupMembers = useMemo(() => {
     return beneficiaries.filter((b) => {
+      // If user selected Peace Group specifically or ALL in category dropdown, don't hide Peace Group members
+      if (selectedCategory === 'ALL' || selectedCategory === 'Peace Group') {
+        return true;
+      }
       if (activeGroup === 'Peace Group') {
         return b.category === 'Peace Group' || Boolean(b.notes && b.notes.toLowerCase().includes('peace'));
       } else {
         return b.category === 'Esther Group Benin' || Boolean(b.notes && b.notes.toLowerCase().includes('esther')) || (!b.category.toLowerCase().includes('peace') && !b.notes?.toLowerCase().includes('peace'));
       }
     });
-  }, [beneficiaries, activeGroup]);
+  }, [beneficiaries, activeGroup, selectedCategory]);
 
   // Filter beneficiaries
   const filteredBeneficiaries = useMemo(() => {
