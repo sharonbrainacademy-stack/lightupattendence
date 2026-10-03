@@ -493,37 +493,33 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
             All Members ({filteredBeneficiaries.length})
           </button>
 
-          {activeGroup === 'Esther Group' && (
-            <button
-              onClick={() => setSelectedCategory('Esther Group Benin')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-extrabold shrink-0 transition-all flex items-center gap-1.5 ${
-                selectedCategory === 'Esther Group Benin'
-                  ? 'bg-gradient-to-r from-pink-500 to-pink-600 text-white shadow-lg shadow-pink-500/20'
-                  : 'bg-pink-500/10 text-pink-300 border border-pink-500/40 hover:bg-pink-500/20'
-              }`}
-            >
-              <span>🌸 Esther Group</span>
-              <span className="px-1.5 py-0.2 bg-purple-950/80 text-pink-300 rounded-md text-[10px]">
-                {beneficiaries.filter(b => b.category === 'Esther Group Benin' || b.notes?.toLowerCase().includes('esther')).length}
-              </span>
-            </button>
-          )}
+          <button
+            onClick={() => setSelectedCategory('Esther Group Benin')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-extrabold shrink-0 transition-all flex items-center gap-1.5 ${
+              selectedCategory === 'Esther Group Benin'
+                ? 'bg-gradient-to-r from-pink-500 to-pink-600 text-white shadow-lg shadow-pink-500/20'
+                : 'bg-pink-500/10 text-pink-300 border border-pink-500/40 hover:bg-pink-500/20'
+            }`}
+          >
+            <span>🌸 Esther Group</span>
+            <span className="px-1.5 py-0.2 bg-purple-950/80 text-pink-300 rounded-md text-[10px]">
+              {beneficiaries.filter(b => b.category === 'Esther Group Benin' || b.notes?.toLowerCase().includes('esther')).length}
+            </span>
+          </button>
 
-          {activeGroup === 'Peace Group' && (
-            <button
-              onClick={() => setSelectedCategory('Peace Group')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-extrabold shrink-0 transition-all flex items-center gap-1.5 ${
-                selectedCategory === 'Peace Group'
-                  ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-lg shadow-emerald-500/20'
-                  : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/20'
-              }`}
-            >
-              <span>🕊️ Peace Group</span>
-              <span className="px-1.5 py-0.2 bg-purple-950/80 text-emerald-300 rounded-md text-[10px]">
-                {beneficiaries.filter(b => b.category === 'Peace Group' || b.notes?.toLowerCase().includes('peace')).length}
-              </span>
-            </button>
-          )}
+          <button
+            onClick={() => setSelectedCategory('Peace Group')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-extrabold shrink-0 transition-all flex items-center gap-1.5 ${
+              selectedCategory === 'Peace Group'
+                ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-lg shadow-emerald-500/20'
+                : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/20'
+            }`}
+          >
+            <span>🕊️ Peace Group</span>
+            <span className="px-1.5 py-0.2 bg-purple-950/80 text-emerald-300 rounded-md text-[10px]">
+              {beneficiaries.filter(b => b.category === 'Peace Group' || b.notes?.toLowerCase().includes('peace')).length}
+            </span>
+          </button>
 
           <button
             onClick={() => setSelectedCategory('Pastor / Minister Care')}

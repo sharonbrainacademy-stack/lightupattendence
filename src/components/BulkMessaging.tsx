@@ -166,7 +166,11 @@ export const BulkMessaging: React.FC<BulkMessagingProps> = ({
       if (cleanPhone.startsWith('0')) {
         cleanPhone = '234' + cleanPhone.slice(1);
       }
-      const encodedMsg = encodeURIComponent(`Dear ${b.fullName},\n\n${messageText}`);
+      let personalizedMsg = messageText
+        .replace(/\{Name\}|\{name\}/g, b.fullName)
+        .replace(/\{Phone\}|\{phone\}/g, b.phoneNumber);
+
+      const encodedMsg = encodeURIComponent(personalizedMsg);
       return {
         name: b.fullName,
         phone: b.phoneNumber,
@@ -446,11 +450,22 @@ export const BulkMessaging: React.FC<BulkMessagingProps> = ({
         {/* Right Column: Message Composer & Multi-Channel Dispatch */}
         <div className="lg:col-span-2 space-y-4">
           
-          {/* Preset Templates */}
+          {/* Preset Templates & Custom Message Option */}
           <div className="p-4 rounded-2xl bg-purple-950/80 border border-purple-800/80 space-y-3">
-            <label className="block text-xs font-extrabold text-amber-300 uppercase tracking-wider font-cinzel">
-              2. Choose Preset Message Template
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-extrabold text-amber-300 uppercase tracking-wider font-cinzel">
+                2. Choose Template or Start Blank
+              </label>
+              <button
+                type="button"
+                onClick={() => setMessageText('')}
+                className="px-2.5 py-1 rounded-lg bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 border border-rose-500/40 text-xs font-bold transition-all cursor-pointer flex items-center gap-1"
+                title="Clear message box to write your own custom message from scratch"
+              >
+                <span>✏️ Type Blank Custom Message</span>
+              </button>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {TEMPLATES.map(t => (
                 <button
@@ -465,29 +480,51 @@ export const BulkMessaging: React.FC<BulkMessagingProps> = ({
             </div>
           </div>
 
-          {/* Message Textarea */}
+          {/* Message Textarea & Custom Variables */}
           <div className="p-4 rounded-2xl bg-purple-950/80 border border-purple-800/80 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <label className="text-xs font-extrabold text-amber-300 uppercase tracking-wider font-cinzel">
-                3. Compose Custom Message Body
+                3. Write or Edit Custom Message Body
               </label>
-              <button
-                type="button"
-                onClick={handleCopyMessage}
-                className="text-xs font-bold text-amber-400 hover:underline flex items-center gap-1"
-              >
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copy Message Text</span>
-              </button>
+              
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMessageText(prev => prev + ' {Name}')}
+                  className="px-2 py-1 rounded-md bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 text-[11px] font-bold cursor-pointer"
+                  title="Appends {Name} variable to personalize message per recipient"
+                >
+                  ➕ Insert &#123;Name&#125;
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMessageText(prev => prev + ' {Phone}')}
+                  className="px-2 py-1 rounded-md bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 text-[11px] font-bold cursor-pointer"
+                  title="Appends {Phone} variable"
+                >
+                  ➕ Insert &#123;Phone&#125;
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopyMessage}
+                  className="text-xs font-bold text-amber-400 hover:underline flex items-center gap-1 ml-1"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copy</span>
+                </button>
+              </div>
             </div>
 
             <textarea
-              rows={4}
+              rows={5}
               value={messageText}
               onChange={(e) => setMessageText(e.target.value)}
-              className="w-full p-3.5 rounded-xl bg-purple-900/60 border border-purple-700 text-amber-100 text-xs font-medium focus:outline-none focus:border-amber-400"
-              placeholder="Type message text here..."
+              className="w-full p-3.5 rounded-xl bg-purple-900/60 border border-purple-700 text-amber-100 text-xs font-medium focus:outline-none focus:border-amber-400 transition-all"
+              placeholder="Type your own custom broadcast announcement, prayer message, or reminder here..."
             />
+            <p className="text-[11px] text-purple-300 italic">
+              💡 <strong>Tip:</strong> You can freely type any custom text in the box above. Using <code>&#123;Name&#125;</code> will automatically replace with each member's actual full name when sending via WhatsApp or SMS!
+            </p>
           </div>
 
           {/* Multi-Channel Delivery Bar */}
