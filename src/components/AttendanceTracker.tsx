@@ -10,6 +10,7 @@ interface AttendanceTrackerProps {
   currentUserName: string;
   activeGroup?: MinistryGroup;
   onOpenGroupSwitchModal?: () => void;
+  onSwitchGroupDirect?: (group: MinistryGroup) => void;
   onSaveSession: (session: AttendanceSession) => void;
   onDeleteSession: (id: string) => void;
   onUpdateBeneficiary?: (b: Beneficiary) => void;
@@ -23,6 +24,7 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
   currentUserName,
   activeGroup = 'Esther Group',
   onOpenGroupSwitchModal,
+  onSwitchGroupDirect,
   onSaveSession,
   onDeleteSession,
   onUpdateBeneficiary,
@@ -314,10 +316,19 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
       const rawDigits = bPhone.replace(/[^0-9]/g, '');
       const noZeroPhone = cleanPhone.replace(/^0+/, '');
 
+      // Determine primary name tokens (outside brackets if available)
+      const primaryCleanName = cleanLineName(outsideText || bFullName);
+      const primaryTokens = primaryCleanName.split(' ').filter(t => t.length >= 1);
+      const isSingleNameMember = primaryTokens.length === 1;
+      const isMultiNameMember = primaryTokens.length >= 2;
+
       return {
         beneficiary: b,
         cleanName: fullCleanName,
         nameTokens: fullTokens,
+        primaryTokens,
+        isSingleNameMember,
+        isMultiNameMember,
         variants,
         cleanPhone,
         shortPhone,
@@ -337,6 +348,8 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
       const lineAllDigits = line.replace(/[^0-9]/g, '');
       const linePhoneMatches = line.match(/\d{7,15}/g) || [];
       const lineTokens = lineCleanName.split(' ').filter(t => t.length >= 1);
+      const isSingleNameLine = lineTokens.length === 1;
+      const isMultiNameLine = lineTokens.length >= 2;
 
       let bestScore = 0;
       let bestBId: string | null = null;
@@ -358,122 +371,100 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
         if (isPhoneMatch) {
           score = 100;
         } else if (lineCleanName.length >= 1) {
-          const lineAlphaOnly = lineCleanName.replace(/[^a-z]/g, '');
+          // STRICT RULE:
+          // A single name can match a single name, but a single name MUST NOT match a double/multi-name!
+          // e.g. "john" can match "john", but "john" CANNOT match "john doris", and "john doris" CANNOT match "john"!
+          if (isSingleNameLine && bObj.isMultiNameMember) {
+            // Single-name input MUST NOT match a double/multi-name member (e.g. "john" -> "john doris")
+            score = 0;
+          } else if (isMultiNameLine && bObj.isSingleNameMember) {
+            // Double/multi-name input MUST NOT match a single-name member (e.g. "john doris" -> "john")
+            score = 0;
+          } else if (isSingleNameLine && bObj.isSingleNameMember) {
+            // BOTH are single names: (e.g. input "john" and member "john")
+            const lineWord = lineTokens[0];
+            const memberWord = bObj.primaryTokens[0];
+            const lineAlpha = lineWord.replace(/[^a-z]/g, '');
+            const memberAlpha = memberWord.replace(/[^a-z]/g, '');
 
-          // Check all name variants (inside bracket, outside bracket, full name, zoom, whatsapp, aliases)
-          bObj.variants.forEach(variant => {
-            let variantScore = 0;
-            const variantAlphaOnly = variant.cleanName.replace(/[^a-z]/g, '');
-
-            // A. Exact string match with variant (98 points)
-            if (lineCleanName === variant.cleanName) {
-              variantScore = 98;
-            }
-            // B. Exact alpha-only match ignoring spaces, digits, and punctuation (98 points)
-            // e.g. "Az Victoria" vs "azvictoria09", "Aghedo Vera" vs "AghedoVera", "George Umoh" vs "georgeumoh129"
-            else if (lineAlphaOnly.length >= 3 && variantAlphaOnly.length >= 3 && lineAlphaOnly === variantAlphaOnly) {
-              variantScore = 98;
-            }
-            // C. Alpha Substring / Prefix match for truncated screen names (92 points)
-            // Require multi-token line and variant so single surname/first-name (e.g. "aghedo") NEVER matches multi-word members (e.g. "Aghedo Osaro")
-            else if (
-              lineTokens.length >= 2 && variant.tokens.length >= 2 &&
-              lineAlphaOnly.length >= 6 && variantAlphaOnly.length >= 6 &&
-              (lineAlphaOnly.startsWith(variantAlphaOnly) || variantAlphaOnly.startsWith(lineAlphaOnly))
-            ) {
-              variantScore = 92;
-            }
-            else {
-              // Enforce strict single-name vs multi-name boundary:
-              // Single-token input must NOT match multi-token variant (e.g. "Aghedo" -> "John Aghedo")
-              // Multi-token input must NOT match single-token variant (e.g. "John Aghedo" -> "Aghedo")
-              const isSingleInput = lineTokens.length === 1;
-              const isSingleVariant = variant.tokens.length === 1;
-
-              if (isSingleInput !== isSingleVariant) {
-                // If single-word input (e.g. "Aghedo" or "Juliet"), check if this word is UNIQUE to a single member in directory
-                if (isSingleInput && lineTokens[0].length >= 3) {
-                  const sToken = lineTokens[0];
-                  const sTokenAlpha = sToken.replace(/[^a-z]/g, '');
-
-                  // Find all beneficiaries who have this name token in any of their variants
-                  const uniqueMatches = cleanBeneficiaries.filter(b => 
-                    b.variants.some(v => v.tokens.some(vt => {
-                      const vtAlpha = vt.replace(/[^a-z]/g, '');
-                      return vt === sToken || (vtAlpha.length >= 3 && vtAlpha === sTokenAlpha) || getSimilarity(vt, sToken) >= 0.88;
-                    }))
-                  );
-
-                  if (uniqueMatches.length === 1 && uniqueMatches[0].beneficiary.id === bObj.beneficiary.id) {
-                    // Unique single-name match! Score 88 -> Auto-marked Present
-                    variantScore = 88;
-                  } else {
-                    // Multiple members or zero members match this name -> Ambiguous, score 0 so it goes to Discarded Entries for manual review
-                    variantScore = 0;
+            if (lineWord === memberWord || (lineAlpha.length >= 3 && lineAlpha === memberAlpha)) {
+              score = 98; // Exact single-name match (e.g. "john" === "john")
+            } else if (getSimilarity(lineWord, memberWord) >= 0.85) {
+              score = 85; // Close single-name match (minor spelling variation)
+            } else {
+              // Check any single-name variant (e.g. single-word Zoom name or alias)
+              bObj.variants.forEach(variant => {
+                if (variant.tokens.length === 1) {
+                  const vWord = variant.tokens[0];
+                  const vAlpha = vWord.replace(/[^a-z]/g, '');
+                  if (lineWord === vWord || (lineAlpha.length >= 3 && lineAlpha === vAlpha)) {
+                    score = Math.max(score, 95);
+                  } else if (getSimilarity(lineWord, vWord) >= 0.85) {
+                    score = Math.max(score, 82);
                   }
-                } else {
-                  variantScore = 0;
                 }
+              });
+            }
+          } else if (isMultiNameLine && bObj.isMultiNameMember) {
+            // BOTH are double/multi-names: (e.g. input "john doris" and member "john doris")
+            const lineAlphaOnly = lineCleanName.replace(/[^a-z]/g, '');
+
+            bObj.variants.forEach(variant => {
+              // Multi-name inputs must only match multi-name variants (>= 2 tokens)
+              if (variant.tokens.length < 2) return;
+
+              let variantScore = 0;
+              const variantAlphaOnly = variant.cleanName.replace(/[^a-z]/g, '');
+
+              // A. Exact string match with variant (98 points)
+              if (lineCleanName === variant.cleanName) {
+                variantScore = 98;
+              }
+              // B. Exact alpha-only match ignoring spaces, digits, and punctuation (98 points)
+              else if (lineAlphaOnly.length >= 4 && variantAlphaOnly.length >= 4 && lineAlphaOnly === variantAlphaOnly) {
+                variantScore = 98;
+              }
+              // C. Alpha Substring / Prefix match for truncated Zoom screen names (92 points)
+              else if (
+                lineAlphaOnly.length >= 6 && variantAlphaOnly.length >= 6 &&
+                (lineAlphaOnly.startsWith(variantAlphaOnly) || variantAlphaOnly.startsWith(lineAlphaOnly))
+              ) {
+                variantScore = 92;
               } else {
-                if (isSingleInput && isSingleVariant) {
-                  // Single-name to Single-name matching
-                  const singleInput = lineTokens[0];
-                  const singleVariant = variant.tokens[0];
-                  const singleInputAlpha = singleInput.replace(/[^a-z]/g, '');
-                  const singleVarAlpha = singleVariant.replace(/[^a-z]/g, '');
+                // Multi-word to Multi-word token matching
+                let matchedTokenCount = 0;
 
-                  if (singleInput === singleVariant || (singleInputAlpha.length >= 3 && singleInputAlpha === singleVarAlpha)) {
-                    variantScore = 98; // Exact single-name match
-                  } else if (getSimilarity(singleInput, singleVariant) >= 0.82) {
-                    variantScore = 85; // High similarity single-name match
-                  }
-                } else {
-                  // Multi-word to Multi-word matching
-                  let matchedTokenCount = 0;
-
-                  variant.tokens.forEach(vt => {
-                    const vtAlpha = vt.replace(/[^a-z]/g, '');
-                    const hasExactMatch = lineTokens.some(lt => {
-                      const ltAlpha = lt.replace(/[^a-z]/g, '');
-                      return vt === lt || (vtAlpha.length >= 3 && vtAlpha === ltAlpha);
-                    });
-                    const hasFuzzyMatch = lineTokens.some(lt => vt === lt || getSimilarity(vt, lt) >= 0.80);
-                    if (hasExactMatch || hasFuzzyMatch) {
-                      matchedTokenCount++;
-                    }
+                variant.tokens.forEach(vt => {
+                  const vtAlpha = vt.replace(/[^a-z]/g, '');
+                  const hasExactMatch = lineTokens.some(lt => {
+                    const ltAlpha = lt.replace(/[^a-z]/g, '');
+                    return vt === lt || (vtAlpha.length >= 3 && vtAlpha === ltAlpha);
                   });
-
-                  if (matchedTokenCount === variant.tokens.length) {
-                    // All words of member's name matched in line
-                    variantScore = 96;
-                  } else if (matchedTokenCount >= 2 && variant.tokens.length >= 2) {
-                    // Multi-word partial match (at least 2 words matched)
-                    variantScore = 88;
-                  } else if (matchedTokenCount >= 1 && variant.tokens.length === 2 && lineTokens.length >= 2) {
-                    const fullSim = getSimilarity(lineCleanName, variant.cleanName);
-                    if (fullSim >= 0.70) {
-                      variantScore = 80;
-                    }
-                  } else {
-                    variantScore = 0;
+                  const hasFuzzyMatch = lineTokens.some(lt => vt === lt || getSimilarity(vt, lt) >= 0.80);
+                  if (hasExactMatch || hasFuzzyMatch) {
+                    matchedTokenCount++;
                   }
-                }
+                });
 
-                // C. Fuzzy string similarity with variant
-                const fullSim = getSimilarity(lineCleanName, variant.cleanName);
-                if (fullSim >= 0.78) {
-                  const simScore = Math.round(fullSim * 100);
-                  if (simScore > variantScore) {
-                    variantScore = simScore;
+                if (matchedTokenCount === variant.tokens.length) {
+                  // All words of member's name matched in line
+                  variantScore = 96;
+                } else if (matchedTokenCount >= 2 && variant.tokens.length >= 2) {
+                  // Multi-word partial match (at least 2 words matched)
+                  variantScore = 88;
+                } else if (matchedTokenCount >= 1 && variant.tokens.length === 2 && lineTokens.length === 2) {
+                  const fullSim = getSimilarity(lineCleanName, variant.cleanName);
+                  if (fullSim >= 0.75) {
+                    variantScore = 80;
                   }
                 }
               }
-            }
 
-            if (variantScore > score) {
-              score = variantScore;
-            }
-          });
+              if (variantScore > score) {
+                score = variantScore;
+              }
+            });
+          }
         }
 
         if (score > bestScore) {
@@ -1665,14 +1656,49 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            {onSwitchGroupDirect && (
+              <div className="flex items-center gap-1 p-1 rounded-2xl bg-purple-900/60 border border-purple-700 shadow-inner">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSwitchGroupDirect('Esther Group');
+                    setCategoryFilter('Esther Group Benin');
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeGroup === 'Esther Group'
+                      ? 'bg-gradient-to-r from-pink-500 to-pink-600 text-white shadow-md'
+                      : 'text-purple-300 hover:text-white'
+                  }`}
+                  title="Switch to Esther Group (Benin)"
+                >
+                  <span>🌸 Esther Group</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSwitchGroupDirect('Peace Group');
+                    setCategoryFilter('Peace Group');
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeGroup === 'Peace Group'
+                      ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-md'
+                      : 'text-purple-300 hover:text-white'
+                  }`}
+                  title="Switch to Peace Group"
+                >
+                  <span>🕊️ Peace Group</span>
+                </button>
+              </div>
+            )}
+
             {onOpenGroupSwitchModal && (
               <button
                 onClick={onOpenGroupSwitchModal}
-                className="px-4 py-2.5 rounded-2xl bg-purple-900/80 hover:bg-purple-800 text-amber-300 border border-purple-600 text-xs font-bold flex items-center gap-1.5 shadow-lg cursor-pointer transition-all hover:scale-105"
-                title="Switch between Esther Group and Peace Group (Password Protected)"
+                className="px-3 py-2 rounded-xl bg-purple-900/80 hover:bg-purple-800 text-amber-300 border border-purple-600 text-xs font-bold flex items-center gap-1.5 shadow-lg cursor-pointer transition-all"
+                title="Manage Group Passwords"
               >
                 <ArrowRightLeft className="w-3.5 h-3.5" />
-                <span>Switch Group ({activeGroup === 'Peace Group' ? 'Esther' : 'Peace'})</span>
+                <span>Security</span>
               </button>
             )}
 
@@ -2800,10 +2826,13 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
                         const cleanEntry = cleanLineName(entry);
                         const entryTokens = cleanEntry.split(' ').filter((t: string) => t.length >= 2);
 
-                        // Find smart suggestion candidate among absent members
+                        // Find smart suggestion candidate among absent members respecting single vs double name rule
                         const candidate = autoMatchResult.absentMembers.find(abs => {
                           const absClean = cleanLineName(abs.fullName);
-                          const absTokens = absClean.split(' ');
+                          const absTokens = absClean.split(' ').filter((t: string) => t.length >= 1);
+                          // Single-name entries must not suggest multi-name members, and vice-versa
+                          if (entryTokens.length === 1 && absTokens.length !== 1) return false;
+                          if (entryTokens.length >= 2 && absTokens.length < 2) return false;
                           return entryTokens.some((et: string) => absTokens.some((at: string) => at === et || getSimilarity(at, et) >= 0.82));
                         });
 

@@ -65,6 +65,15 @@ export const AirtimeForm: React.FC<AirtimeFormProps> = ({
     }
   }, [phoneNumber]);
 
+  // Sync default purpose when active group changes
+  useEffect(() => {
+    if (activeGroup === 'Peace Group') {
+      setPurpose('Peace Group');
+    } else {
+      setPurpose('Esther Group Benin');
+    }
+  }, [activeGroup]);
+
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setPhoneNumber(val);

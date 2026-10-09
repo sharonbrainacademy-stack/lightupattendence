@@ -10,6 +10,7 @@ interface DashboardProps {
   activeGroup?: MinistryGroup;
   isAuthenticated?: boolean;
   onOpenGroupSwitchModal?: () => void;
+  onSwitchGroupDirect?: (group: MinistryGroup) => void;
   onNavigate: (tab: 'dashboard' | 'beneficiaries' | 'attendance' | 'bulk_msg' | 'distribution' | 'records' | 'reports') => void;
   onViewRecord: (record: AirtimeRecord) => void;
 }
@@ -20,6 +21,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   activeGroup = 'Esther Group',
   isAuthenticated = false,
   onOpenGroupSwitchModal,
+  onSwitchGroupDirect,
   onNavigate,
   onViewRecord,
 }) => {
@@ -129,24 +131,47 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
 
-        {onOpenGroupSwitchModal && (
-          <button
-            onClick={onOpenGroupSwitchModal}
-            className="px-4 py-2 rounded-xl bg-purple-900/70 hover:bg-purple-800 border border-purple-600 text-xs font-bold text-amber-300 hover:text-amber-200 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm hover:scale-[1.02]"
-          >
-            {isAuthenticated ? (
-              <>
-                <ArrowRightLeft className="w-3.5 h-3.5" />
-                <span>Switch Active Group</span>
-              </>
-            ) : (
-              <>
-                <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-                <span>🔐 Group Admin Login</span>
-              </>
-            )}
-          </button>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {onSwitchGroupDirect && (
+            <div className="flex items-center gap-1 p-1 rounded-xl bg-purple-900/60 border border-purple-700">
+              <button
+                type="button"
+                onClick={() => onSwitchGroupDirect('Esther Group')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                  activeGroup === 'Esther Group'
+                    ? 'bg-gradient-to-r from-pink-500 to-pink-600 text-white shadow-md'
+                    : 'text-purple-300 hover:text-white'
+                }`}
+                title="Switch to Esther Group (Benin)"
+              >
+                <span>🌸 Esther Group</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onSwitchGroupDirect('Peace Group')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                  activeGroup === 'Peace Group'
+                    ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-md'
+                    : 'text-purple-300 hover:text-white'
+                }`}
+                title="Switch to Peace Group"
+              >
+                <span>🕊️ Peace Group</span>
+              </button>
+            </div>
+          )}
+
+          {onOpenGroupSwitchModal && (
+            <button
+              onClick={onOpenGroupSwitchModal}
+              className="px-3.5 py-2 rounded-xl bg-purple-900/70 hover:bg-purple-800 border border-purple-600 text-xs font-bold text-amber-300 hover:text-amber-200 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm hover:scale-[1.02]"
+              title="Manage Group Passwords and Security"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+              <span>Group Security</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Quick Stats Grid */}

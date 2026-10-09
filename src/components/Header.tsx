@@ -9,6 +9,7 @@ interface HeaderProps {
   activeGroup: MinistryGroup;
   isAuthenticated: boolean;
   onOpenGroupSwitchModal: () => void;
+  onSwitchGroupDirect?: (group: MinistryGroup) => void;
   onOpenAdminModal: () => void;
   onLogout: () => void;
   onSelectTab: (tab: 'dashboard' | 'beneficiaries' | 'attendance' | 'bulk_msg' | 'distribution' | 'records' | 'reports') => void;
@@ -21,6 +22,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeGroup,
   isAuthenticated,
   onOpenGroupSwitchModal,
+  onSwitchGroupDirect,
   onOpenAdminModal,
   onLogout,
   onSelectTab,
@@ -80,38 +82,53 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Right Controls & Authentication Status */}
           <div className="flex items-center justify-between sm:justify-end gap-2.5 flex-wrap">
+            {/* Prominent 1-Click Ministry Group Switcher */}
+            <div className="flex items-center gap-1 p-1 rounded-2xl bg-purple-900/80 border border-amber-500/40 shadow-inner">
+              <button
+                type="button"
+                onClick={() => onSwitchGroupDirect ? onSwitchGroupDirect('Esther Group') : onOpenGroupSwitchModal()}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                  activeGroup === 'Esther Group'
+                    ? 'bg-gradient-to-r from-pink-500 to-pink-600 text-white shadow-md ring-1 ring-pink-300'
+                    : 'text-purple-300 hover:text-white hover:bg-purple-800/50'
+                }`}
+                title="Switch view to Esther Group (Benin)"
+              >
+                <span>🌸 Esther Group</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onSwitchGroupDirect ? onSwitchGroupDirect('Peace Group') : onOpenGroupSwitchModal()}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                  activeGroup === 'Peace Group'
+                    ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-md ring-1 ring-emerald-300'
+                    : 'text-purple-300 hover:text-white hover:bg-purple-800/50'
+                }`}
+                title="Switch view to Peace Group"
+              >
+                <span>🕊️ Peace Group</span>
+              </button>
+            </div>
+
             {/* Group Admin Auth Mode Pill */}
             {isAuthenticated ? (
               <div className="flex items-center gap-1.5">
                 <button
                   onClick={onOpenGroupSwitchModal}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-sm cursor-pointer hover:scale-105 active:scale-95 ${
-                    activeGroup === 'Peace Group'
-                      ? 'bg-emerald-950/90 border-emerald-500/60 text-emerald-200 hover:bg-emerald-900 shadow-emerald-950/40 ring-1 ring-emerald-500/30'
-                      : 'bg-pink-950/90 border-pink-500/60 text-pink-200 hover:bg-pink-900 shadow-pink-950/40 ring-1 ring-pink-500/30'
-                  }`}
-                  title="Click to switch active group"
+                  className="px-2.5 py-1.5 rounded-xl bg-purple-900/60 hover:bg-purple-800 border border-purple-700/60 text-xs font-bold text-amber-300 flex items-center gap-1 cursor-pointer transition-all"
+                  title="Manage Group Passwords"
                 >
-                  <span className="text-sm">{activeGroup === 'Peace Group' ? '🕊️' : '🌸'}</span>
-                  <div className="text-left leading-tight">
-                    <div className="text-[9px] uppercase tracking-wider text-amber-300 font-bold flex items-center gap-1">
-                      <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
-                      <span>Admin Logged In</span>
-                    </div>
-                    <div className="font-extrabold flex items-center gap-1 text-white">
-                      <span>{activeGroup}</span>
-                      <ArrowRightLeft className="w-3 h-3 opacity-70" />
-                    </div>
-                  </div>
+                  <Key className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="hidden sm:inline">Group Security</span>
                 </button>
 
                 <button
                   onClick={onLogout}
                   className="px-2.5 py-1.5 rounded-xl bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800 text-xs font-bold flex items-center gap-1 shadow-sm transition-all cursor-pointer"
-                  title="Lock admin session and return to Public Summary Mode"
+                  title="Lock admin session"
                 >
                   <LogOut className="w-3.5 h-3.5 text-rose-400" />
-                  <span className="hidden sm:inline">Lock Session</span>
+                  <span className="hidden sm:inline">Lock</span>
                 </button>
               </div>
             ) : (
@@ -121,7 +138,7 @@ export const Header: React.FC<HeaderProps> = ({
                 title="Log in with group password to perform special operations"
               >
                 <Lock className="w-3.5 h-3.5 fill-purple-950" />
-                <span>🔐 Group Admin Login</span>
+                <span>🔐 Admin Login</span>
               </button>
             )}
 

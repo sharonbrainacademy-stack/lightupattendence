@@ -64,7 +64,7 @@ function getInitialSampleAttendanceSessions(): AttendanceSession[] {
       serviceDate: todayStr,
       recordedBy: 'Bro Stephen',
       notes: '05:00 AM WAT Daily Morning Devotional Prayers & covenant blessing for Esther Group members.',
-      records: INITIAL_REGISTERED_BENEFICIARIES.map((b, idx) => ({
+      records: INITIAL_REGISTERED_BENEFICIARIES.filter(b => b.category === 'Esther Group Benin').map((b, idx) => ({
         beneficiaryId: b.id,
         fullName: b.fullName,
         phoneNumber: b.phoneNumber,
@@ -76,13 +76,31 @@ function getInitialSampleAttendanceSessions(): AttendanceSession[] {
       updatedAt: today.toISOString()
     },
     {
+      id: `att-sample-peace-today`,
+      serviceName: 'Peace Group Morning Devotional Prayers',
+      serviceType: 'Daily Morning Devotional',
+      serviceDate: todayStr,
+      recordedBy: 'Bro Stephen',
+      notes: 'Peace Group Daily Morning Devotional Prayers roll call and fellowship.',
+      records: INITIAL_REGISTERED_BENEFICIARIES.filter(b => b.category === 'Peace Group').map((b, idx) => ({
+        beneficiaryId: b.id,
+        fullName: b.fullName,
+        phoneNumber: b.phoneNumber,
+        category: b.category,
+        status: idx % 5 === 0 ? 'Late' : idx % 7 === 0 ? 'Absent' : 'Present',
+        checkInTime: '05:03'
+      })),
+      createdAt: today.toISOString(),
+      updatedAt: today.toISOString()
+    },
+    {
       id: `att-sample-yesterday`,
       serviceName: 'Daily Morning Devotional Prayers',
       serviceType: 'Daily Morning Devotional',
       serviceDate: yesterdayStr,
       recordedBy: 'Bro Stephen',
       notes: 'Glorious morning revival session. Attendance taken at 05:15 AM WAT.',
-      records: INITIAL_REGISTERED_BENEFICIARIES.map((b, idx) => ({
+      records: INITIAL_REGISTERED_BENEFICIARIES.filter(b => b.category === 'Esther Group Benin').map((b, idx) => ({
         beneficiaryId: b.id,
         fullName: b.fullName,
         phoneNumber: b.phoneNumber,
@@ -100,7 +118,7 @@ function getInitialSampleAttendanceSessions(): AttendanceSession[] {
       serviceDate: prev3DaysStr,
       recordedBy: 'Bro Stephen',
       notes: 'Special miracle & revival service with full Esther Group Benin turnout.',
-      records: INITIAL_REGISTERED_BENEFICIARIES.map((b, idx) => ({
+      records: INITIAL_REGISTERED_BENEFICIARIES.filter(b => b.category === 'Esther Group Benin').map((b, idx) => ({
         beneficiaryId: b.id,
         fullName: b.fullName,
         phoneNumber: b.phoneNumber,
@@ -137,6 +155,32 @@ export function subscribeToBeneficiaries(callback: (list: Beneficiary[]) => void
     });
 
     if (list.length > 0) {
+      // CRITICAL: Ensure Peace Group members are NEVER lost or omitted from Firestore
+      const hasPeace = list.some(b => b.category === 'Peace Group' || b.notes?.toLowerCase().includes('peace'));
+      if (!hasPeace) {
+        const peaceMembers = INITIAL_REGISTERED_BENEFICIARIES.filter(b => b.category === 'Peace Group');
+        peaceMembers.forEach(b => {
+          setDoc(doc(db, 'beneficiaries', b.id), sanitizeForFirestore(b)).catch(() => {});
+          list.push(b);
+        });
+      }
+
+      // Merge any locally added beneficiaries not yet present in Firestore snapshot
+      try {
+        const rawLocal = localStorage.getItem(BENEFICIARIES_KEY);
+        if (rawLocal) {
+          const localList: Beneficiary[] = JSON.parse(rawLocal);
+          localList.forEach(localB => {
+            if (!list.some(item => item.id === localB.id)) {
+              setDoc(doc(db, 'beneficiaries', localB.id), sanitizeForFirestore(localB)).catch(() => {});
+              list.push(localB);
+            }
+          });
+        }
+      } catch (e) {
+        console.warn('Local merge exception ignored', e);
+      }
+
       // Sort beneficiaries alphabetically by full name for a stable, predictable order
       list.sort((a, b) => (a.fullName || '').localeCompare(b.fullName || ''));
       saveBeneficiaries(list);
@@ -167,6 +211,24 @@ export function subscribeToAttendanceSessions(callback: (list: AttendanceSession
     });
 
     if (list.length > 0) {
+      // Ensure Peace Group attendance session is available in Firestore
+      const hasPeaceSession = list.some(s =>
+        s.serviceName?.toLowerCase().includes('peace') ||
+        s.notes?.toLowerCase().includes('peace') ||
+        s.records?.some(r => r.category === 'Peace Group')
+      );
+      if (!hasPeaceSession) {
+        const peaceSessions = getInitialSampleAttendanceSessions().filter(s =>
+          s.serviceName?.toLowerCase().includes('peace') ||
+          s.notes?.toLowerCase().includes('peace') ||
+          s.records?.some(r => r.category === 'Peace Group')
+        );
+        peaceSessions.forEach(s => {
+          setDoc(doc(db, 'attendanceSessions', s.id), sanitizeForFirestore(s)).catch(() => {});
+          list.push(s);
+        });
+      }
+
       list.sort((a, b) => b.serviceDate.localeCompare(a.serviceDate));
       localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(list));
       callback(list);
@@ -195,6 +257,16 @@ export function subscribeToRecords(callback: (list: AirtimeRecord[]) => void) {
     });
 
     if (list.length > 0) {
+      // Ensure Peace Group records are present in Firestore
+      const hasPeaceRecords = list.some(r => r.purpose === 'Peace Group' || r.purpose.toLowerCase().includes('peace'));
+      if (!hasPeaceRecords) {
+        const peaceRecords = INITIAL_SAMPLE_RECORDS.filter(r => r.purpose === 'Peace Group' || r.purpose.toLowerCase().includes('peace'));
+        peaceRecords.forEach(r => {
+          setDoc(doc(db, 'airtimeRecords', r.id), sanitizeForFirestore(r)).catch(() => {});
+          list.push(r);
+        });
+      }
+
       list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
       saveRecords(list);
       callback(list);
@@ -247,7 +319,19 @@ export function getBeneficiaries(): Beneficiary[] {
       localStorage.setItem(BENEFICIARIES_KEY, JSON.stringify(INITIAL_REGISTERED_BENEFICIARIES));
       return INITIAL_REGISTERED_BENEFICIARIES;
     }
-    return JSON.parse(raw);
+    const parsed: Beneficiary[] = JSON.parse(raw);
+    // If stored list doesn't have Peace Group members yet, merge them in automatically
+    const hasPeace = parsed.some(b => b.category === 'Peace Group' || b.notes?.toLowerCase().includes('peace'));
+    if (!hasPeace) {
+      const peaceMembers = INITIAL_REGISTERED_BENEFICIARIES.filter(b => b.category === 'Peace Group');
+      const merged = [...parsed, ...peaceMembers];
+      localStorage.setItem(BENEFICIARIES_KEY, JSON.stringify(merged));
+      peaceMembers.forEach(b => {
+        setDoc(doc(db, 'beneficiaries', b.id), sanitizeForFirestore(b)).catch(() => {});
+      });
+      return merged;
+    }
+    return parsed;
   } catch (err) {
     console.error('Error reading beneficiaries:', err);
     return INITIAL_REGISTERED_BENEFICIARIES;
@@ -425,7 +509,26 @@ export function getAttendanceSessions(): AttendanceSession[] {
       localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(sampleSessions));
       return sampleSessions;
     }
-    return JSON.parse(raw);
+    const parsed: AttendanceSession[] = JSON.parse(raw);
+    const hasPeaceSession = parsed.some(s =>
+      s.serviceName?.toLowerCase().includes('peace') ||
+      s.notes?.toLowerCase().includes('peace') ||
+      s.records?.some(r => r.category === 'Peace Group')
+    );
+    if (!hasPeaceSession) {
+      const peaceSessions = getInitialSampleAttendanceSessions().filter(s =>
+        s.serviceName?.toLowerCase().includes('peace') ||
+        s.notes?.toLowerCase().includes('peace') ||
+        s.records?.some(r => r.category === 'Peace Group')
+      );
+      const merged = [...parsed, ...peaceSessions];
+      localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(merged));
+      peaceSessions.forEach(s => {
+        setDoc(doc(db, 'attendanceSessions', s.id), sanitizeForFirestore(s)).catch(() => {});
+      });
+      return merged;
+    }
+    return parsed;
   } catch (err) {
     console.error('Error reading attendance sessions:', err);
     return [];
@@ -510,7 +613,18 @@ export function getStoredRecords(): AirtimeRecord[] {
       localStorage.setItem(RECORDS_KEY, JSON.stringify(INITIAL_SAMPLE_RECORDS));
       return INITIAL_SAMPLE_RECORDS;
     }
-    return JSON.parse(raw);
+    const parsed: AirtimeRecord[] = JSON.parse(raw);
+    const hasPeace = parsed.some(r => r.purpose === 'Peace Group' || r.purpose.toLowerCase().includes('peace'));
+    if (!hasPeace) {
+      const peaceRecords = INITIAL_SAMPLE_RECORDS.filter(r => r.purpose === 'Peace Group' || r.purpose.toLowerCase().includes('peace'));
+      const merged = [...parsed, ...peaceRecords];
+      localStorage.setItem(RECORDS_KEY, JSON.stringify(merged));
+      peaceRecords.forEach(r => {
+        setDoc(doc(db, 'airtimeRecords', r.id), sanitizeForFirestore(r)).catch(() => {});
+      });
+      return merged;
+    }
+    return parsed;
   } catch (err) {
     console.error('Error reading stored records:', err);
     return INITIAL_SAMPLE_RECORDS;

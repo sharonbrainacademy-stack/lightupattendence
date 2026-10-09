@@ -107,7 +107,7 @@ export default function App() {
 
   // Active Ministry Group State (Esther Group vs Peace Group)
   const [activeGroup, setActiveGroupState] = useState<MinistryGroup>(() => getActiveGroup());
-  const [authenticatedGroup, setAuthenticatedGroup] = useState<MinistryGroup | null>(null);
+  const [authenticatedGroup, setAuthenticatedGroup] = useState<MinistryGroup | null>(() => getActiveGroup());
   const [pendingTab, setPendingTab] = useState<'beneficiaries' | 'attendance' | 'bulk_msg' | 'distribution' | null>(null);
   const [isGroupSwitchModalOpen, setIsGroupSwitchModalOpen] = useState(false);
 
@@ -288,6 +288,7 @@ export default function App() {
         activeGroup={activeGroup}
         isAuthenticated={isAuthenticated}
         onOpenGroupSwitchModal={() => setIsGroupSwitchModalOpen(true)}
+        onSwitchGroupDirect={handleGroupSwitched}
         onOpenAdminModal={() => setIsAdminModalOpen(true)}
         onLogout={handleLogout}
         onSelectTab={handleSelectTab}
@@ -321,6 +322,7 @@ export default function App() {
                 activeGroup={activeGroup}
                 isAuthenticated={isAuthenticated}
                 onOpenGroupSwitchModal={() => setIsGroupSwitchModalOpen(true)}
+                onSwitchGroupDirect={handleGroupSwitched}
                 onNavigate={handleSelectTab}
                 onViewRecord={(rec) => setSelectedReceiptRecord(rec)}
               />
@@ -333,6 +335,7 @@ export default function App() {
                 currentUserName={currentUserName}
                 activeGroup={activeGroup}
                 onOpenGroupSwitchModal={() => setIsGroupSwitchModalOpen(true)}
+                onSwitchGroupDirect={handleGroupSwitched}
                 onOneClickDispatch={handleOneClickDispatch}
                 onAddBeneficiary={handleAddBeneficiary}
                 onUpdateBeneficiary={handleUpdateBeneficiary}
@@ -349,6 +352,7 @@ export default function App() {
                   currentUserName={currentUserName}
                   activeGroup={activeGroup}
                   onOpenGroupSwitchModal={() => setIsGroupSwitchModalOpen(true)}
+                  onSwitchGroupDirect={handleGroupSwitched}
                   onSaveSession={handleSaveAttendanceSession}
                   onDeleteSession={handleDeleteAttendanceSession}
                   onUpdateBeneficiary={handleUpdateBeneficiary}

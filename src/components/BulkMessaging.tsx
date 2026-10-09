@@ -61,6 +61,17 @@ export const BulkMessaging: React.FC<BulkMessagingProps> = ({
   const [isSendingVTPassSMS, setIsSendingVTPassSMS] = useState(false);
   const [vtpassSmsResult, setVtpassSmsResult] = useState<string | null>(null);
 
+  // Sync default audience category when activeGroup changes
+  useEffect(() => {
+    if (initialCategory === 'ALL') {
+      if (activeGroup === 'Peace Group') {
+        setAudienceCategory('PEACE_GROUP');
+      } else {
+        setAudienceCategory('ESTHER_GROUP');
+      }
+    }
+  }, [activeGroup, initialCategory]);
+
   // Sync selected phones when audience category changes
   useEffect(() => {
     if (initialPreSelectedPhones.length > 0 && audienceCategory === 'ABSENT_MEMBERS') {

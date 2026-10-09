@@ -11,6 +11,7 @@ interface BeneficiariesDirectoryProps {
   currentUserName: string;
   activeGroup?: MinistryGroup;
   onOpenGroupSwitchModal?: () => void;
+  onSwitchGroupDirect?: (group: MinistryGroup) => void;
   onOneClickDispatch: (
     beneficiary: Beneficiary,
     amount: number,
@@ -42,6 +43,7 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
   currentUserName,
   activeGroup = 'Esther Group',
   onOpenGroupSwitchModal,
+  onSwitchGroupDirect,
   onOneClickDispatch,
   onAddBeneficiary,
   onUpdateBeneficiary,
@@ -466,15 +468,53 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
           </div>
         </div>
 
-        {onOpenGroupSwitchModal && (
-          <button
-            onClick={onOpenGroupSwitchModal}
-            className="px-3.5 py-2 rounded-xl bg-purple-900/70 hover:bg-purple-800 border border-purple-600 text-xs font-bold text-amber-300 hover:text-amber-200 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm hover:scale-[1.02]"
-          >
-            <ArrowRightLeft className="w-3.5 h-3.5" />
-            <span>Switch Group (Password)</span>
-          </button>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {onSwitchGroupDirect && (
+            <div className="flex items-center gap-1 p-1 rounded-xl bg-purple-900/60 border border-purple-700">
+              <button
+                type="button"
+                onClick={() => {
+                  onSwitchGroupDirect('Esther Group');
+                  setSelectedCategory('Esther Group Benin');
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                  activeGroup === 'Esther Group'
+                    ? 'bg-gradient-to-r from-pink-500 to-pink-600 text-white shadow-md'
+                    : 'text-purple-300 hover:text-white'
+                }`}
+                title="Switch to Esther Group (Benin)"
+              >
+                <span>🌸 Esther Group</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onSwitchGroupDirect('Peace Group');
+                  setSelectedCategory('Peace Group');
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                  activeGroup === 'Peace Group'
+                    ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-md'
+                    : 'text-purple-300 hover:text-white'
+                }`}
+                title="Switch to Peace Group"
+              >
+                <span>🕊️ Peace Group</span>
+              </button>
+            </div>
+          )}
+
+          {onOpenGroupSwitchModal && (
+            <button
+              onClick={onOpenGroupSwitchModal}
+              className="px-3 py-1.5 rounded-xl bg-purple-900/70 hover:bg-purple-800 border border-purple-600 text-xs font-bold text-amber-300 hover:text-amber-200 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm hover:scale-[1.02]"
+              title="Manage Passwords"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+              <span>Security</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filter & Search Bar */}
