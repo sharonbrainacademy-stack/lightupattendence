@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Key, Lock, UserCheck, Database, FileText, Download, Upload, Check, AlertCircle, X, History, Sparkles, CreditCard, RefreshCw } from 'lucide-react';
+import { Shield, Key, Lock, UserCheck, Database, FileText, Download, Upload, Check, AlertCircle, X, History, Sparkles, CreditCard, RefreshCw, RotateCcw } from 'lucide-react';
 import { UserRole, AuditLog } from '../types';
 import { getAdminPassword, setAdminPassword, getGroupPasswords, setGroupPasswords, exportBackupJSON, importBackupJSON } from '../utils/storage';
 import { getVTPassConfig, saveVTPassConfig, VTPassConfig } from '../utils/vtpassService';
@@ -613,6 +613,33 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               {importStatus && (
                 <div className="text-xs font-bold text-emerald-400 mt-2">{importStatus}</div>
               )}
+            </div>
+
+            {/* Reset Roster to Official 108 Members */}
+            <div className="p-4 rounded-2xl bg-purple-900/30 border border-purple-800/60 space-y-3">
+              <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                <RotateCcw className="w-4 h-4 text-amber-400" />
+                <span>Reset Register to Official 108 Members</span>
+              </h4>
+              <p className="text-xs text-purple-200">
+                If your browser cache or device storage is still holding onto extra test accounts or showing 122 members, click this button to purge all unauthorized entries and reset directly to the 108 official Esther Group members.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm('Reset member register to the official 108 Esther Group members and purge local cache?')) {
+                    localStorage.removeItem('lightup_beneficiaries');
+                    localStorage.removeItem('lightup_attendance_draft_Esther Group');
+                    localStorage.removeItem('lightup_attendance_draft_Peace Group');
+                    if (onDataRestored) onDataRestored();
+                    window.location.reload();
+                  }
+                }}
+                className="px-5 py-2.5 rounded-xl bg-purple-800 hover:bg-amber-500 hover:text-purple-950 text-amber-300 font-bold text-xs border border-purple-600 transition-all cursor-pointer flex items-center gap-2"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>Reset to Official 108 Esther Group Members</span>
+              </button>
             </div>
           </div>
         )}

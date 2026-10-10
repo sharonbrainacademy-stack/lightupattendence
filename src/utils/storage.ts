@@ -919,16 +919,12 @@ export function purgePeaceGroupAndResetToEsther(): Beneficiary[] {
     // 1. Reset active group in localStorage
     localStorage.setItem(ACTIVE_GROUP_KEY, 'Esther Group');
 
-    // 2. Clean beneficiaries
-    const rawB = localStorage.getItem(BENEFICIARIES_KEY);
-    let list: Beneficiary[] = rawB ? JSON.parse(rawB) : INITIAL_REGISTERED_BENEFICIARIES;
+    // 2. Clean beneficiaries & reset to official 108 Esther Group members
+    localStorage.removeItem('lightup_attendance_draft_Esther Group');
+    localStorage.removeItem('lightup_attendance_draft_Peace Group');
     
-    // Purge any Peace Group members from Firestore
-    list.filter(b => b.category === 'Peace Group' || b.id.startsWith('pgm-') || b.notes?.toLowerCase().includes('peace')).forEach(b => {
-      deleteDoc(doc(db, 'beneficiaries', b.id)).catch(() => {});
-    });
-
-    const cleanList = list.filter(b => b.category !== 'Peace Group' && !b.id.startsWith('pgm-') && !b.notes?.toLowerCase().includes('peace'));
+    // Always enforce the exact official Esther Group roster (108 members)
+    const cleanList = INITIAL_REGISTERED_BENEFICIARIES;
     localStorage.setItem(BENEFICIARIES_KEY, JSON.stringify(cleanList));
 
     // 3. Clean attendance sessions
