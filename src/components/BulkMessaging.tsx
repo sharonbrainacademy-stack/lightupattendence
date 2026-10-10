@@ -48,9 +48,9 @@ export const BulkMessaging: React.FC<BulkMessagingProps> = ({
       text: `Grace and Peace from Light Up Prayer House! We missed you at our service. We pray God's mighty blessings over your week. Let us know if you have any prayer request! We Pray, Believe, Rise, and Overcome! 🔥`
     },
     {
-      id: 'airtime_blessing',
-      label: '🎁 Airtime Blessing Notice',
-      text: `Dear Beloved, a blessing of airtime has been sent to your phone line from Light Up Prayer House Family Outreach. May God replenish and empower you in Jesus name!`
+      id: 'prayer_encouragement',
+      label: '🙏 Prophetic Prayer & Blessing',
+      text: `Beloved, we speak peace and divine acceleration into your life today! May the Lord fight your battles and grant you divine favour in all your endeavors! We Move By Fire — Pray • Believe • Rise • Overcome! 🔥`
     }
   ];
 

@@ -49,14 +49,54 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
   );
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
 
-  // Automatically sync category filter when activeGroup changes
+  // Automatically sync category filter, draft, and recordsMap when activeGroup changes
   useEffect(() => {
     if (activeGroup === 'Peace Group') {
       setCategoryFilter('Peace Group');
+      setServiceName(prev => prev.includes('Esther') || prev === 'Daily Morning Devotional Prayers' ? 'Daily Morning Devotional Prayers (Peace Group)' : prev);
     } else {
-      setCategoryFilter('ALL');
+      setCategoryFilter('Esther Group Benin');
+      setServiceName(prev => prev.includes('Peace') || prev === 'Daily Morning Devotional Prayers' ? 'Daily Morning Devotional Prayers (Esther Group)' : prev);
     }
-  }, [activeGroup]);
+
+    // Try loading saved draft for this specific group
+    try {
+      const savedDraft = localStorage.getItem(`lightup_attendance_draft_${activeGroup}`);
+      if (savedDraft) {
+        const parsed = JSON.parse(savedDraft);
+        if (parsed && parsed.recordsMap && Object.keys(parsed.recordsMap).length > 0) {
+          setRecordsMap(parsed.recordsMap);
+          if (parsed.serviceName) setServiceName(parsed.serviceName);
+          if (parsed.notes) setNotes(parsed.notes);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('Draft load ignored');
+    }
+
+    // If no draft exists, initialize recordsMap with members of the active group
+    const initialMap: Record<string, AttendanceRecordItem> = {};
+    const relevantBeneficiaries = (beneficiaries || []).filter(b => {
+      if (activeGroup === 'Peace Group') {
+        return b.category === 'Peace Group' || Boolean(b.notes && b.notes.toLowerCase().includes('peace'));
+      } else {
+        return b.category === 'Esther Group Benin' || Boolean(b.notes && b.notes.toLowerCase().includes('esther')) || (!b.category?.toLowerCase().includes('peace') && !b.notes?.toLowerCase().includes('peace'));
+      }
+    });
+
+    relevantBeneficiaries.forEach(b => {
+      initialMap[b.id] = {
+        beneficiaryId: b.id,
+        fullName: b.fullName,
+        phoneNumber: b.phoneNumber,
+        category: b.category,
+        status: 'Absent',
+        checkInTime: '05:00'
+      };
+    });
+    setRecordsMap(initialMap);
+  }, [activeGroup, beneficiaries]);
 
   // Attendance Records State map: beneficiaryId -> AttendanceRecordItem
   const [recordsMap, setRecordsMap] = useState<Record<string, AttendanceRecordItem>>(() => {
@@ -73,7 +113,15 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
     }
 
     const initialMap: Record<string, AttendanceRecordItem> = {};
-    beneficiaries.forEach(b => {
+    const relevantBeneficiaries = (beneficiaries || []).filter(b => {
+      if (activeGroup === 'Peace Group') {
+        return b.category === 'Peace Group' || Boolean(b.notes && b.notes.toLowerCase().includes('peace'));
+      } else {
+        return b.category === 'Esther Group Benin' || Boolean(b.notes && b.notes.toLowerCase().includes('esther')) || (!b.category?.toLowerCase().includes('peace') && !b.notes?.toLowerCase().includes('peace'));
+      }
+    });
+
+    relevantBeneficiaries.forEach(b => {
       initialMap[b.id] = {
         beneficiaryId: b.id,
         fullName: b.fullName,
@@ -628,8 +676,76 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
     setTimeout(() => setSaveNotification(null), 5000);
   };
 
+  // Member Traceability & Date Search State
+  const [isTraceabilityModalOpen, setIsTraceabilityModalOpen] = useState(false);
+  const [selectedTraceMemberId, setSelectedTraceMemberId] = useState<string | null>(null);
+  const [traceSearchTerm, setTraceSearchTerm] = useState('');
+
+  // Date Filter State for Historic Sessions
+  const [dateFilterFrom, setDateFilterFrom] = useState('');
+  const [dateFilterTo, setDateFilterTo] = useState('');
+
+  // Export CSV Options Modal State & Target Group Filter
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [exportTargetGroup, setExportTargetGroup] = useState<'Esther Group' | 'Peace Group' | 'ALL'>(
+    activeGroup === 'Peace Group' ? 'Peace Group' : 'Esther Group'
+  );
+
+  // Sync export target group with activeGroup
+  useEffect(() => {
+    setExportTargetGroup(activeGroup === 'Peace Group' ? 'Peace Group' : 'Esther Group');
+  }, [activeGroup]);
+
+  // Helper to trigger browser CSV file download
+  const downloadCSVFile = (csvContent: string, fileName: string) => {
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', fileName);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Deduplication helper to ensure all registered members are preserved with strict group filtering
+  const getDeduplicatedBeneficiaries = (
+    list: Beneficiary[],
+    overrideGroup?: 'Esther Group' | 'Peace Group' | 'ALL'
+  ): Beneficiary[] => {
+    const target = overrideGroup !== undefined ? overrideGroup : exportTargetGroup;
+    const seen = new Set<string>();
+    const unique: Beneficiary[] = [];
+
+    (list || []).forEach(b => {
+      if (!b || !b.id) return;
+
+      if (target === 'Peace Group') {
+        const isPeace = b.category === 'Peace Group' || Boolean(b.notes && b.notes.toLowerCase().includes('peace'));
+        if (!isPeace) return;
+      } else if (target === 'Esther Group') {
+        const isEsther =
+          b.category === 'Esther Group Benin' ||
+          Boolean(b.notes && b.notes.toLowerCase().includes('esther')) ||
+          (!b.category?.toLowerCase().includes('peace') && !b.notes?.toLowerCase().includes('peace'));
+        if (!isEsther) return;
+      }
+
+      const key = b.id;
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(b);
+      }
+    });
+
+    return unique.sort((a, b) => (a?.fullName || '').localeCompare(b?.fullName || ''));
+  };
+
   // Helper to merge live active roll call with historic sessions for real-time accurate CSV exports
-  const getEffectiveAttendanceSessions = (): AttendanceSession[] => {
+  const getEffectiveAttendanceSessions = (
+    overrideGroup?: 'Esther Group' | 'Peace Group' | 'ALL'
+  ): AttendanceSession[] => {
+    const target = overrideGroup !== undefined ? overrideGroup : exportTargetGroup;
     const activeRecords = Object.values(recordsMap);
     const activeSessionId = selectedSessionId === 'NEW' ? `att-${serviceDate}` : selectedSessionId;
 
@@ -650,66 +766,32 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
       !(s.serviceDate === serviceDate && s.serviceType === serviceType)
     );
 
-    return [activeSessionObj, ...historicSessions];
-  };
+    const merged = [activeSessionObj, ...historicSessions];
 
-  // Member Traceability & Date Search State
-  const [isTraceabilityModalOpen, setIsTraceabilityModalOpen] = useState(false);
-  const [selectedTraceMemberId, setSelectedTraceMemberId] = useState<string | null>(null);
-  const [traceSearchTerm, setTraceSearchTerm] = useState('');
+    if (target === 'Peace Group') {
+      return merged.filter(s =>
+        s.serviceName?.toLowerCase().includes('peace') ||
+        s.notes?.toLowerCase().includes('peace') ||
+        s.records?.some(r => r.category === 'Peace Group')
+      );
+    } else if (target === 'Esther Group') {
+      return merged.filter(s =>
+        !s.serviceName?.toLowerCase().includes('peace') &&
+        !s.notes?.toLowerCase().includes('peace') &&
+        !s.records?.every(r => r.category === 'Peace Group')
+      );
+    }
 
-  // Date Filter State for Historic Sessions
-  const [dateFilterFrom, setDateFilterFrom] = useState('');
-  const [dateFilterTo, setDateFilterTo] = useState('');
-
-  // Export CSV Options Modal State
-  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
-
-  // Helper to trigger browser CSV file download
-  const downloadCSVFile = (csvContent: string, fileName: string) => {
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', fileName);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  // Deduplication helper to ensure all registered members are preserved (Filtered strictly by active group)
-  const getDeduplicatedBeneficiaries = (list: Beneficiary[]): Beneficiary[] => {
-    const seen = new Set<string>();
-    const unique: Beneficiary[] = [];
-
-    (list || []).forEach(b => {
-      if (!b || !b.id) return;
-
-      if (activeGroup === 'Peace Group') {
-        const isPeace = b.category === 'Peace Group' || Boolean(b.notes && b.notes.toLowerCase().includes('peace'));
-        if (!isPeace) return;
-      } else {
-        const isEsther = b.category === 'Esther Group Benin' || Boolean(b.notes && b.notes.toLowerCase().includes('esther')) || (!b.category.toLowerCase().includes('peace') && !b.notes?.toLowerCase().includes('peace'));
-        if (!isEsther) return;
-      }
-
-      const key = b.id;
-      if (!seen.has(key)) {
-        seen.add(key);
-        unique.push(b);
-      }
-    });
-
-    return unique.sort((a, b) => (a?.fullName || '').localeCompare(b?.fullName || ''));
+    return merged;
   };
 
   // 1. Export Matrix Grid CSV (1 Row per Unique Member, Meeting Dates in Columns)
   const handleExportMatrixCSV = () => {
-    const uniqueMembers = getDeduplicatedBeneficiaries(beneficiaries);
-    const effectiveSessions = getEffectiveAttendanceSessions();
+    const uniqueMembers = getDeduplicatedBeneficiaries(beneficiaries, exportTargetGroup);
+    const effectiveSessions = getEffectiveAttendanceSessions(exportTargetGroup);
     const sortedSessions = [...effectiveSessions].sort((a, b) => a.serviceDate.localeCompare(b.serviceDate));
-    const groupTitleName = activeGroup === 'Peace Group' ? 'PEACE GROUP' : 'ESTHER GROUP BENIN';
-    const fileGroupName = activeGroup === 'Peace Group' ? 'Peace_Group' : 'Esther_Group_Benin';
+    const groupTitleName = exportTargetGroup === 'Peace Group' ? 'PEACE GROUP' : exportTargetGroup === 'ALL' ? 'ALL MINISTRIES' : 'ESTHER GROUP BENIN';
+    const fileGroupName = exportTargetGroup === 'Peace Group' ? 'Peace_Group' : exportTargetGroup === 'ALL' ? 'All_Ministries' : 'Esther_Group_Benin';
 
     const titleBlock = [
       `"","LIGHT UP PRAYER HOUSE — ${groupTitleName} ATTENDANCE REGISTER MATRIX"`,
@@ -818,9 +900,9 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
 
   // 2. Export Active Session Roll Call CSV (Present Members Listed First, Absent Members Below)
   const handleExportActiveSessionCSV = () => {
-    const allMembers = getDeduplicatedBeneficiaries(beneficiaries);
-    const groupTitleName = activeGroup === 'Peace Group' ? 'PEACE GROUP' : 'ESTHER GROUP BENIN';
-    const fileGroupName = activeGroup === 'Peace Group' ? 'Peace_Group' : 'Esther_Group_Benin';
+    const allMembers = getDeduplicatedBeneficiaries(beneficiaries, exportTargetGroup);
+    const groupTitleName = exportTargetGroup === 'Peace Group' ? 'PEACE GROUP' : exportTargetGroup === 'ALL' ? 'ALL MINISTRIES' : 'ESTHER GROUP BENIN';
+    const fileGroupName = exportTargetGroup === 'Peace Group' ? 'Peace_Group' : exportTargetGroup === 'ALL' ? 'All_Ministries' : 'Esther_Group_Benin';
     
     const sessionRecords: AttendanceRecordItem[] = allMembers.map(m => {
       const rec = recordsMap[m.id] || {
@@ -890,11 +972,11 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
 
   // 3. Export Master Historical Log (Grouped by Date, Present Members Above, Absent Below)
   const handleExportMasterCSV = () => {
-    const effectiveSessions = getEffectiveAttendanceSessions();
+    const effectiveSessions = getEffectiveAttendanceSessions(exportTargetGroup);
     const sortedSessions = [...effectiveSessions].sort((a, b) => b.serviceDate.localeCompare(a.serviceDate));
-    const allMembers = getDeduplicatedBeneficiaries(beneficiaries);
-    const groupTitleName = activeGroup === 'Peace Group' ? 'PEACE GROUP' : 'ESTHER GROUP BENIN';
-    const fileGroupName = activeGroup === 'Peace Group' ? 'Peace_Group' : 'Esther_Group_Benin';
+    const allMembers = getDeduplicatedBeneficiaries(beneficiaries, exportTargetGroup);
+    const groupTitleName = exportTargetGroup === 'Peace Group' ? 'PEACE GROUP' : exportTargetGroup === 'ALL' ? 'ALL MINISTRIES' : 'ESTHER GROUP BENIN';
+    const fileGroupName = exportTargetGroup === 'Peace Group' ? 'Peace_Group' : exportTargetGroup === 'ALL' ? 'All_Ministries' : 'Esther_Group_Benin';
 
     if (sortedSessions.length === 0) {
       handleExportActiveSessionCSV();
@@ -961,10 +1043,10 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
 
   // 4. Export Member Traceability Summary CSV (Deduplicated Unique Members)
   const handleExportMemberSummaryCSV = () => {
-    const uniqueMembers = getDeduplicatedBeneficiaries(beneficiaries);
-    const effectiveSessions = getEffectiveAttendanceSessions();
-    const groupTitleName = activeGroup === 'Peace Group' ? 'PEACE GROUP' : 'ESTHER GROUP BENIN';
-    const fileGroupName = activeGroup === 'Peace Group' ? 'Peace_Group' : 'Esther_Group_Benin';
+    const uniqueMembers = getDeduplicatedBeneficiaries(beneficiaries, exportTargetGroup);
+    const effectiveSessions = getEffectiveAttendanceSessions(exportTargetGroup);
+    const groupTitleName = exportTargetGroup === 'Peace Group' ? 'PEACE GROUP' : exportTargetGroup === 'ALL' ? 'ALL MINISTRIES' : 'ESTHER GROUP BENIN';
+    const fileGroupName = exportTargetGroup === 'Peace Group' ? 'Peace_Group' : exportTargetGroup === 'ALL' ? 'All_Ministries' : 'Esther_Group_Benin';
 
     const titleBlock = [
       `"","LIGHT UP PRAYER HOUSE — ${groupTitleName} MEMBER ATTENDANCE TRACEABILITY SUMMARY"`,
@@ -1030,9 +1112,9 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
 
   // 5. Export Active Session PDF Format Report
   const handleExportActiveSessionPDF = () => {
-    const allMembers = getDeduplicatedBeneficiaries(beneficiaries);
-    const groupTitleName = activeGroup === 'Peace Group' ? 'PEACE GROUP' : 'ESTHER GROUP BENIN';
-    const fileGroupName = activeGroup === 'Peace Group' ? 'Peace_Group' : 'Esther_Group_Benin';
+    const allMembers = getDeduplicatedBeneficiaries(beneficiaries, exportTargetGroup);
+    const groupTitleName = exportTargetGroup === 'Peace Group' ? 'PEACE GROUP' : exportTargetGroup === 'ALL' ? 'ALL MINISTRIES' : 'ESTHER GROUP BENIN';
+    const fileGroupName = exportTargetGroup === 'Peace Group' ? 'Peace_Group' : exportTargetGroup === 'ALL' ? 'All_Ministries' : 'Esther_Group_Benin';
 
     const sessionRecords: AttendanceRecordItem[] = allMembers.map(m => {
       const rec = recordsMap[m.id] || {
@@ -1165,10 +1247,10 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
 
   // 6. Export Member Traceability Summary PDF
   const handleExportMemberSummaryPDF = () => {
-    const uniqueMembers = getDeduplicatedBeneficiaries(beneficiaries);
-    const effectiveSessions = getEffectiveAttendanceSessions();
-    const groupTitleName = activeGroup === 'Peace Group' ? 'PEACE GROUP' : 'ESTHER GROUP BENIN';
-    const fileGroupName = activeGroup === 'Peace Group' ? 'Peace_Group' : 'Esther_Group_Benin';
+    const uniqueMembers = getDeduplicatedBeneficiaries(beneficiaries, exportTargetGroup);
+    const effectiveSessions = getEffectiveAttendanceSessions(exportTargetGroup);
+    const groupTitleName = exportTargetGroup === 'Peace Group' ? 'PEACE GROUP' : exportTargetGroup === 'ALL' ? 'ALL MINISTRIES' : 'ESTHER GROUP BENIN';
+    const fileGroupName = exportTargetGroup === 'Peace Group' ? 'Peace_Group' : exportTargetGroup === 'ALL' ? 'All_Ministries' : 'Esther_Group_Benin';
 
     const pdf = new jsPDF('portrait', 'mm', 'a4');
 
@@ -1566,9 +1648,19 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
     });
   }, [beneficiaries, searchQuery, categoryFilter, statusFilter, recordsMap, activeGroup]);
 
-  // Statistics
+  // Statistics strictly scoped to the active ministry group
   const stats = useMemo(() => {
-    const list = Object.values(recordsMap);
+    const activeMemberIds = new Set(
+      (beneficiaries || []).filter(b => {
+        if (activeGroup === 'Peace Group') {
+          return b.category === 'Peace Group' || Boolean(b.notes && b.notes.toLowerCase().includes('peace'));
+        } else {
+          return b.category === 'Esther Group Benin' || Boolean(b.notes && b.notes.toLowerCase().includes('esther')) || (!b.category?.toLowerCase().includes('peace') && !b.notes?.toLowerCase().includes('peace'));
+        }
+      }).map(b => b.id)
+    );
+
+    const list = Object.values(recordsMap).filter(r => activeMemberIds.size === 0 || activeMemberIds.has(r.beneficiaryId));
     const total = list.length;
     const present = list.filter(r => r.status === 'Present').length;
     const late = list.filter(r => r.status === 'Late').length;
@@ -1584,7 +1676,7 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
     });
 
     return { total, present, late, absent, excused, percentage, absentCategoryCounts, absentRecords };
-  }, [recordsMap]);
+  }, [recordsMap, activeGroup, beneficiaries]);
 
   // Save session handler
   const handleSave = () => {
@@ -2922,6 +3014,75 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
             <p className="text-xs text-purple-200/90 leading-relaxed">
               Select an attendance CSV report format below. All exports are clean, deduplicated, and formatted into standard Excel spreadsheets without repetitive records.
             </p>
+
+            {/* Target Group Selector For Export */}
+            <div className="p-3.5 rounded-2xl bg-purple-900/60 border border-purple-700 space-y-2.5">
+              <div className="flex items-center justify-between text-xs font-bold text-amber-300">
+                <span className="flex items-center gap-1.5">
+                  <Filter className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Filter Members For This Export:</span>
+                </span>
+                <span className={`text-[11px] font-extrabold px-2 py-0.5 rounded-full border ${
+                  exportTargetGroup === 'Esther Group'
+                    ? 'bg-pink-500/20 text-pink-300 border-pink-500/40'
+                    : exportTargetGroup === 'Peace Group'
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                }`}>
+                  {exportTargetGroup === 'Esther Group' ? '🌸 Esther Group Only' : exportTargetGroup === 'Peace Group' ? '🕊️ Peace Group Only' : '🌐 All Groups Combined'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setExportTargetGroup('Esther Group')}
+                  className={`py-2 px-2 rounded-xl text-xs font-bold transition-all flex flex-col sm:flex-row items-center justify-center gap-1 border cursor-pointer ${
+                    exportTargetGroup === 'Esther Group'
+                      ? 'bg-gradient-to-r from-pink-600 to-pink-500 text-white border-pink-400 font-black shadow-lg ring-2 ring-pink-400/50'
+                      : 'bg-purple-950/60 text-purple-200 border-purple-700 hover:bg-purple-900/80 hover:text-white'
+                  }`}
+                >
+                  <span>🌸 Esther Group</span>
+                  <span className="text-[10px] opacity-90 font-mono">({getDeduplicatedBeneficiaries(beneficiaries, 'Esther Group').length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setExportTargetGroup('Peace Group')}
+                  className={`py-2 px-2 rounded-xl text-xs font-bold transition-all flex flex-col sm:flex-row items-center justify-center gap-1 border cursor-pointer ${
+                    exportTargetGroup === 'Peace Group'
+                      ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white border-emerald-400 font-black shadow-lg ring-2 ring-emerald-400/50'
+                      : 'bg-purple-950/60 text-purple-200 border-purple-700 hover:bg-purple-900/80 hover:text-white'
+                  }`}
+                >
+                  <span>🕊️ Peace Group</span>
+                  <span className="text-[10px] opacity-90 font-mono">({getDeduplicatedBeneficiaries(beneficiaries, 'Peace Group').length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setExportTargetGroup('ALL')}
+                  className={`py-2 px-2 rounded-xl text-xs font-bold transition-all flex flex-col sm:flex-row items-center justify-center gap-1 border cursor-pointer ${
+                    exportTargetGroup === 'ALL'
+                      ? 'bg-gradient-to-r from-amber-500 to-amber-400 text-purple-950 border-amber-300 font-black shadow-lg ring-2 ring-amber-400/50'
+                      : 'bg-purple-950/60 text-purple-200 border-purple-700 hover:bg-purple-900/80 hover:text-white'
+                  }`}
+                >
+                  <span>🌐 All Groups</span>
+                  <span className="text-[10px] opacity-90 font-mono">({getDeduplicatedBeneficiaries(beneficiaries, 'ALL').length})</span>
+                </button>
+              </div>
+
+              {exportTargetGroup === 'Esther Group' && (
+                <div className="text-[11px] text-pink-200 bg-pink-950/50 border border-pink-800/60 rounded-xl px-3 py-1.5 flex items-center gap-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-pink-400 shrink-0" />
+                  <span>
+                    <strong>Exporting Esther Group Only:</strong> Exactly {getDeduplicatedBeneficiaries(beneficiaries, 'Esther Group').length} Esther Group members will be included. Peace Group members are excluded from the exported CSV.
+                  </span>
+                </div>
+              )}
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 

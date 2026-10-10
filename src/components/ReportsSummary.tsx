@@ -1,304 +1,354 @@
 import React, { useState, useMemo } from 'react';
-import { FileText, Printer, Download, Sparkles, Layers, ShieldCheck, TrendingUp, Users, HeartHandshake, PhoneCall, Award } from 'lucide-react';
-import { AirtimeRecord, NetworkType, MinistryGroup } from '../types';
-import { formatNaira } from '../utils/receiptGenerator';
-import { getNetworkBadgeStyle } from '../utils/networkDetector';
+import {
+  FileText,
+  Printer,
+  Download,
+  Sparkles,
+  TrendingUp,
+  Users,
+  CheckCircle2,
+  Calendar,
+  XCircle,
+  Clock,
+  Award,
+  AlertTriangle,
+  ArrowRightLeft
+} from 'lucide-react';
+import * as XLSX from 'xlsx';
+import { jsPDF } from 'jspdf';
+import { AttendanceSession, Beneficiary, MinistryGroup } from '../types';
 
 interface ReportsSummaryProps {
-  records: AirtimeRecord[];
+  attendanceSessions?: AttendanceSession[];
+  beneficiaries?: Beneficiary[];
   activeGroup?: MinistryGroup;
 }
 
-export const ReportsSummary: React.FC<ReportsSummaryProps> = ({ records, activeGroup = 'Esther Group' }) => {
-  const [selectedPeriod, setSelectedPeriod] = useState<'ALL' | 'THIS_MONTH' | 'LAST_MONTH'>('ALL');
+export const ReportsSummary: React.FC<ReportsSummaryProps> = ({
+  attendanceSessions = [],
+  beneficiaries = [],
+  activeGroup = 'Esther Group',
+}) => {
+  const [selectedGroup, setSelectedGroup] = useState<'ALL' | 'Esther Group' | 'Peace Group'>(activeGroup);
 
-  // Filter records by group first
-  const groupFilteredRecords = useMemo(() => {
-    return records.filter(r => {
-      if (activeGroup === 'Peace Group') {
-        return r.purpose === 'Peace Group' || r.purpose.toLowerCase().includes('peace');
-      } else {
-        return r.purpose === 'Esther Group Benin' || r.purpose.toLowerCase().includes('esther') || (!r.purpose.toLowerCase().includes('peace'));
+  React.useEffect(() => {
+    setSelectedGroup(activeGroup);
+  }, [activeGroup]);
+
+  // Determine group of session
+  const getSessionGroup = (s: AttendanceSession): 'Peace Group' | 'Esther Group' => {
+    if (
+      s.serviceName?.toLowerCase().includes('peace') ||
+      s.notes?.toLowerCase().includes('peace') ||
+      s.records?.some(r => r.category === 'Peace Group')
+    ) {
+      return 'Peace Group';
+    }
+    return 'Esther Group';
+  };
+
+  // Filtered sessions
+  const filteredSessions = useMemo(() => {
+    return attendanceSessions.filter(s => {
+      if (selectedGroup === 'ALL') return true;
+      return getSessionGroup(s) === selectedGroup;
+    });
+  }, [attendanceSessions, selectedGroup]);
+
+  // Member attendance leaderboard
+  const memberConsistency = useMemo(() => {
+    const memberMap: Record<string, {
+      fullName: string;
+      phoneNumber: string;
+      category: string;
+      totalMeetings: number;
+      presentCount: number;
+      absentCount: number;
+      lateCount: number;
+    }> = {};
+
+    filteredSessions.forEach(session => {
+      session.records?.forEach(rec => {
+        const id = rec.beneficiaryId || rec.fullName;
+        if (!memberMap[id]) {
+          memberMap[id] = {
+            fullName: rec.fullName,
+            phoneNumber: rec.phoneNumber,
+            category: rec.category,
+            totalMeetings: 0,
+            presentCount: 0,
+            absentCount: 0,
+            lateCount: 0
+          };
+        }
+        memberMap[id].totalMeetings++;
+        if (rec.status === 'Present') memberMap[id].presentCount++;
+        else if (rec.status === 'Late') memberMap[id].lateCount++;
+        else if (rec.status === 'Absent') memberMap[id].absentCount++;
+      });
+    });
+
+    const list = Object.values(memberMap).map(m => {
+      const rate = m.totalMeetings > 0
+        ? Math.round(((m.presentCount + m.lateCount) / m.totalMeetings) * 100)
+        : 0;
+      return { ...m, rate };
+    });
+
+    return list.sort((a, b) => b.rate - a.rate || b.presentCount - a.presentCount);
+  }, [filteredSessions]);
+
+  // Top faithful attendees
+  const faithfulMembers = memberConsistency.filter(m => m.rate >= 80).slice(0, 10);
+  // Frequent absentees needing follow up
+  const absenteeAlerts = memberConsistency.filter(m => m.absentCount >= 2 || m.rate < 50).slice(0, 10);
+
+  // Turnout rates by service type
+  const serviceTypeStats = useMemo(() => {
+    const map: Record<string, { count: number; totalRoster: number; totalPresent: number }> = {};
+    filteredSessions.forEach(s => {
+      const type = s.serviceType || 'Daily Morning Devotional';
+      if (!map[type]) {
+        map[type] = { count: 0, totalRoster: 0, totalPresent: 0 };
       }
+      const present = s.records?.filter(r => r.status === 'Present' || r.status === 'Late').length || 0;
+      map[type].count++;
+      map[type].totalRoster += s.records?.length || 0;
+      map[type].totalPresent += present;
     });
-  }, [records, activeGroup]);
 
-  // Filter records by period
-  const periodRecords = useMemo(() => {
-    if (selectedPeriod === 'ALL') return groupFilteredRecords;
-
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth();
-
-    return groupFilteredRecords.filter((r) => {
-      const recDate = new Date(r.distributionDate);
-      if (selectedPeriod === 'THIS_MONTH') {
-        return recDate.getFullYear() === currentYear && recDate.getMonth() === currentMonth;
-      }
-      if (selectedPeriod === 'LAST_MONTH') {
-        const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1;
-        const year = currentMonth === 0 ? currentYear - 1 : currentYear;
-        return recDate.getFullYear() === year && recDate.getMonth() === lastMonth;
-      }
-      return true;
+    return Object.entries(map).map(([type, data]) => {
+      const rate = data.totalRoster > 0 ? Math.round((data.totalPresent / data.totalRoster) * 100) : 0;
+      return { type, ...data, rate };
     });
-  }, [records, selectedPeriod]);
+  }, [filteredSessions]);
 
-  // Total Disbursed
-  const totalAmount = periodRecords.reduce((sum, r) => sum + r.amount, 0);
-  const totalBeneficiaries = new Set(periodRecords.map((r) => r.beneficiaryName.toLowerCase().trim())).size;
+  // Export Analytics to Excel
+  const handleExportAnalyticsExcel = () => {
+    const memberRows = memberConsistency.map(m => ({
+      'Full Name': m.fullName,
+      'Phone': m.phoneNumber,
+      'Group': m.category,
+      'Meetings Held': m.totalMeetings,
+      'Present': m.presentCount,
+      'Late': m.lateCount,
+      'Absent': m.absentCount,
+      'Attendance Rate': `${m.rate}%`
+    }));
 
-  // Breakdown by Purpose
-  const purposeBreakdown = useMemo(() => {
-    const map: Record<string, { count: number; total: number }> = {};
-    periodRecords.forEach((r) => {
-      if (!map[r.purpose]) {
-        map[r.purpose] = { count: 0, total: 0 };
-      }
-      map[r.purpose].count += 1;
-      map[r.purpose].total += r.amount;
+    const ws = XLSX.utils.json_to_sheet(memberRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Member Consistency');
+    XLSX.writeFile(wb, `LightUp_Attendance_Audit_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  // Export PDF Report
+  const handleExportPDF = () => {
+    const doc = new jsPDF();
+    doc.setFontSize(16);
+    doc.setTextColor(74, 20, 140);
+    doc.text('LIGHT UP PRAYER HOUSE — FAMILY OUTREACH', 14, 20);
+    doc.setFontSize(12);
+    doc.setTextColor(0, 0, 0);
+    doc.text(`Official Attendance Audit & Consistency Report (${selectedGroup})`, 14, 28);
+    doc.setFontSize(9);
+    doc.text(`Generated: ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`, 14, 34);
+
+    let y = 44;
+    doc.setFont('helvetica', 'bold');
+    doc.text('Top Faithful Attendees (High Turnout)', 14, y);
+    y += 6;
+
+    faithfulMembers.slice(0, 15).forEach((m, i) => {
+      doc.setFont('helvetica', 'normal');
+      doc.text(`${i + 1}. ${m.fullName} (${m.phoneNumber}) — ${m.rate}% Turnout (${m.presentCount} attended)`, 14, y);
+      y += 5.5;
     });
-    return map;
-  }, [periodRecords]);
 
-  // Breakdown by Network
-  const networkBreakdown = useMemo(() => {
-    const map: Record<NetworkType, { count: number; total: number }> = {
-      MTN: { count: 0, total: 0 },
-      Glo: { count: 0, total: 0 },
-      Airtel: { count: 0, total: 0 },
-      '9Mobile': { count: 0, total: 0 },
-      Other: { count: 0, total: 0 },
-    };
-    periodRecords.forEach((r) => {
-      const net = r.network || 'Other';
-      if (!map[net]) map[net] = { count: 0, total: 0 };
-      map[net].count += 1;
-      map[net].total += r.amount;
-    });
-    return map;
-  }, [periodRecords]);
-
-  // Breakdown by Minister
-  const ministerBreakdown = useMemo(() => {
-    const map: Record<string, { count: number; total: number }> = {};
-    periodRecords.forEach((r) => {
-      const minister = r.distributedBy || 'Ministry Volunteer';
-      if (!map[minister]) map[minister] = { count: 0, total: 0 };
-      map[minister].count += 1;
-      map[minister].total += r.amount;
-    });
-    return map;
-  }, [periodRecords]);
+    doc.save(`LightUp_Attendance_Report_${selectedGroup}.pdf`);
+  };
 
   return (
     <div className="space-y-6">
-      {/* Header Banner */}
-      <div className="p-6 rounded-3xl bg-gradient-to-r from-purple-950 via-purple-900 to-slate-950 border border-amber-500/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl sm:text-2xl font-extrabold font-cinzel text-white flex items-center gap-2">
-            <span>📊 Ministry Reports &amp; Transparency Audit</span>
-          </h2>
-          <p className="text-xs text-amber-200/80 mt-1">
-            Comprehensive financial breakdown by outreach purpose, network provider, and minister disburser.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Period Selector Chips */}
-          <div className="flex bg-purple-950 p-1 rounded-xl border border-purple-800/80 text-xs font-bold">
-            <button
-              onClick={() => setSelectedPeriod('ALL')}
-              className={`px-3 py-1.5 rounded-lg transition-all ${
-                selectedPeriod === 'ALL' ? 'bg-amber-500 text-purple-950 font-bold' : 'text-purple-300 hover:text-white'
-              }`}
-            >
-              All Time
-            </button>
-            <button
-              onClick={() => setSelectedPeriod('THIS_MONTH')}
-              className={`px-3 py-1.5 rounded-lg transition-all ${
-                selectedPeriod === 'THIS_MONTH' ? 'bg-amber-500 text-purple-950 font-bold' : 'text-purple-300 hover:text-white'
-              }`}
-            >
-              This Month
-            </button>
-            <button
-              onClick={() => setSelectedPeriod('LAST_MONTH')}
-              className={`px-3 py-1.5 rounded-lg transition-all ${
-                selectedPeriod === 'LAST_MONTH' ? 'bg-amber-500 text-purple-950 font-bold' : 'text-purple-300 hover:text-white'
-              }`}
-            >
-              Last Month
-            </button>
+      
+      {/* Top Banner */}
+      <div className="relative overflow-hidden p-6 rounded-3xl bg-gradient-to-r from-purple-950 via-slate-900 to-indigo-950 border border-amber-500/30 shadow-2xl">
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="space-y-1">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-bold uppercase tracking-wider">
+              <TrendingUp className="w-3.5 h-3.5 text-amber-400" />
+              <span>Ministry Roll Call Audit &amp; Analytics</span>
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-extrabold font-cinzel text-amber-100 flex items-center gap-3 flex-wrap">
+              <span>Attendance Reports &amp; Turnout Metrics</span>
+            </h2>
+            <p className="text-xs sm:text-sm text-purple-200/90 max-w-2xl">
+              Comprehensive attendance statistics, member faithfulness rankings, absentee alerts, and meeting service breakdown for Light Up Prayer House.
+            </p>
           </div>
 
-          <button
-            onClick={() => window.print()}
-            className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-purple-950 font-extrabold text-xs flex items-center gap-1.5 shadow-md transition-all"
-          >
-            <Printer className="w-4 h-4" />
-            <span>Print Audit Summary</span>
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1 p-1 rounded-xl bg-purple-900/60 border border-purple-700">
+              <button
+                type="button"
+                onClick={() => setSelectedGroup('ALL')}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  selectedGroup === 'ALL'
+                    ? 'bg-amber-500 text-purple-950 font-black'
+                    : 'text-purple-300 hover:text-white'
+                }`}
+              >
+                All Groups
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedGroup('Esther Group')}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  selectedGroup === 'Esther Group'
+                    ? 'bg-pink-600 text-white font-black'
+                    : 'text-purple-300 hover:text-white'
+                }`}
+              >
+                🌸 Esther Group
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedGroup('Peace Group')}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  selectedGroup === 'Peace Group'
+                    ? 'bg-emerald-600 text-white font-black'
+                    : 'text-purple-300 hover:text-white'
+                }`}
+              >
+                🕊️ Peace Group
+              </button>
+            </div>
+
+            <button
+              onClick={handleExportAnalyticsExcel}
+              className="px-3.5 py-2 rounded-xl bg-purple-900/80 hover:bg-purple-800 text-emerald-300 border border-purple-700 text-xs font-bold flex items-center gap-1.5 shadow-md cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Excel Audit</span>
+            </button>
+
+            <button
+              onClick={handleExportPDF}
+              className="px-3.5 py-2 rounded-xl bg-purple-900/80 hover:bg-purple-800 text-amber-300 border border-purple-700 text-xs font-bold flex items-center gap-1.5 shadow-md cursor-pointer"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>PDF Report</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Top Metrics Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        
-        <div className="p-5 rounded-2xl bg-purple-900/30 border border-purple-800/50 space-y-2">
-          <div className="text-xs font-bold uppercase text-purple-300">Total Airtime Disbursed</div>
-          <div className="text-2xl sm:text-3xl font-extrabold font-cinzel text-amber-300">
-            {formatNaira(totalAmount)}
-          </div>
-          <div className="text-[11px] text-slate-400">100% Accounted for in Ministry Audit</div>
-        </div>
-
-        <div className="p-5 rounded-2xl bg-purple-900/30 border border-purple-800/50 space-y-2">
-          <div className="text-xs font-bold uppercase text-purple-300">Beneficiaries Reached</div>
-          <div className="text-2xl sm:text-3xl font-extrabold font-cinzel text-white">
-            {totalBeneficiaries} <span className="text-xs font-sans text-purple-300">Individuals</span>
-          </div>
-          <div className="text-[11px] text-slate-400">Across {periodRecords.length} Distributions</div>
-        </div>
-
-        <div className="p-5 rounded-2xl bg-purple-900/30 border border-purple-800/50 space-y-2">
-          <div className="text-xs font-bold uppercase text-purple-300">Average Gift Amount</div>
-          <div className="text-2xl sm:text-3xl font-extrabold font-cinzel text-emerald-400">
-            {formatNaira(periodRecords.length ? totalAmount / periodRecords.length : 0)}
-          </div>
-          <div className="text-[11px] text-slate-400">Per outreach beneficiary</div>
-        </div>
-
-      </div>
-
-      {/* Purpose & Network Breakdown Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        
-        {/* Purpose Category Breakdown */}
-        <div className="p-6 rounded-3xl bg-purple-950/60 border border-purple-800/50 space-y-4">
-          <div className="flex items-center justify-between border-b border-purple-800/60 pb-3">
-            <h3 className="text-base font-bold font-cinzel text-white flex items-center gap-2">
-              <HeartHandshake className="w-5 h-5 text-amber-400" />
-              <span>Breakdown by Outreach Category</span>
-            </h3>
-            <span className="text-xs text-purple-300 font-semibold">{Object.keys(purposeBreakdown).length} Categories</span>
-          </div>
-
-          <div className="space-y-3">
-            {Object.entries(purposeBreakdown).map(([purpose, stat]) => {
-              const percentage = totalAmount > 0 ? (stat.total / totalAmount) * 100 : 0;
-              return (
-                <div key={purpose} className="space-y-1.5 p-3 rounded-xl bg-purple-900/30 border border-purple-800/40">
-                  <div className="flex items-center justify-between text-xs font-bold">
-                    <span className="text-white">{purpose}</span>
-                    <span className="text-amber-300 font-cinzel">{formatNaira(stat.total)} ({stat.count} gifts)</span>
-                  </div>
-
-                  {/* Progress Bar */}
-                  <div className="w-full h-2 rounded-full bg-purple-950 overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-amber-500 to-amber-300 rounded-full transition-all duration-500"
-                      style={{ width: `${Math.min(percentage, 100)}%` }}
-                    />
-                  </div>
-
-                  <div className="text-[10px] text-purple-300 text-right">
-                    {percentage.toFixed(1)}% of total outreach disbursement
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Network Breakdown */}
-        <div className="p-6 rounded-3xl bg-purple-950/60 border border-purple-800/50 space-y-4">
-          <div className="flex items-center justify-between border-b border-purple-800/60 pb-3">
-            <h3 className="text-base font-bold font-cinzel text-white flex items-center gap-2">
-              <PhoneCall className="w-5 h-5 text-emerald-400" />
-              <span>Telecom Network Distribution</span>
-            </h3>
-            <span className="text-xs text-purple-300 font-semibold">Nigerian Telecoms</span>
-          </div>
-
-          <div className="space-y-3">
-            {Object.entries(networkBreakdown).map(([net, stat]) => {
-              if (stat.count === 0) return null;
-              const badgeStyle = getNetworkBadgeStyle(net as NetworkType);
-              const percentage = totalAmount > 0 ? (stat.total / totalAmount) * 100 : 0;
-
-              return (
-                <div key={net} className="p-3.5 rounded-xl bg-purple-900/30 border border-purple-800/40 space-y-2">
-                  <div className="flex items-center justify-between text-xs font-bold">
-                    <span className={`px-2.5 py-0.5 rounded-full font-bold border ${badgeStyle.bg} ${badgeStyle.text} ${badgeStyle.border}`}>
-                      {net}
-                    </span>
-                    <span className="text-emerald-400 font-cinzel text-sm">{formatNaira(stat.total)}</span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-[11px] text-slate-300">
-                    <span>{stat.count} Transfers</span>
-                    <span>{percentage.toFixed(1)}% Share</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-      </div>
-
-      {/* Minister Disbursement Audit Table */}
-      <div className="p-6 rounded-3xl bg-purple-950/60 border border-purple-800/50 space-y-4">
-        <h3 className="text-base font-bold font-cinzel text-white flex items-center gap-2">
-          <Award className="w-5 h-5 text-amber-400" />
-          <span>Disbursement Log by Minister / Volunteer</span>
+      {/* Service Type Turnout Breakdown */}
+      <div className="p-5 rounded-3xl bg-purple-950/70 border border-purple-800/80 shadow-xl space-y-4">
+        <h3 className="text-base font-extrabold text-amber-100 font-cinzel flex items-center gap-2">
+          <Calendar className="w-4 h-4 text-amber-400" />
+          <span>Attendance Turnout by Service Type</span>
         </h3>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-purple-200">
-            <thead className="bg-purple-900/60 text-amber-300 font-bold uppercase tracking-wider">
-              <tr>
-                <th className="p-3 rounded-l-xl">Minister / Volunteer Name</th>
-                <th className="p-3">Gifts Handled</th>
-                <th className="p-3">Total Amount Disbursed</th>
-                <th className="p-3 rounded-r-xl">Share (%)</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-purple-800/40">
-              {Object.entries(ministerBreakdown).map(([minister, stat]) => {
-                const percentage = totalAmount > 0 ? (stat.total / totalAmount) * 100 : 0;
-                return (
-                  <tr key={minister} className="hover:bg-purple-900/30 transition-colors">
-                    <td className="p-3 font-bold text-white">{minister}</td>
-                    <td className="p-3 text-purple-200">{stat.count} Transactions</td>
-                    <td className="p-3 font-extrabold font-cinzel text-amber-300">{formatNaira(stat.total)}</td>
-                    <td className="p-3 text-slate-300">{percentage.toFixed(1)}%</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {serviceTypeStats.map(st => (
+            <div key={st.type} className="p-4 rounded-2xl bg-purple-900/40 border border-purple-800/80 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-amber-200">{st.type}</span>
+                <span className="text-lg font-black font-cinzel text-emerald-400">{st.rate}%</span>
+              </div>
+              <div className="text-[11px] text-purple-300 font-mono">
+                {st.count} sessions held • {st.totalPresent} attendances
+              </div>
+              <div className="w-full h-1.5 rounded-full bg-purple-950 overflow-hidden">
+                <div className="h-full bg-emerald-400 rounded-full" style={{ width: `${st.rate}%` }} />
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* Printable Audit Statement for Leadership */}
-      <div className="printable-area p-6 rounded-3xl bg-purple-950 border border-amber-500/30 text-center space-y-3">
-        <div className="text-xs font-bold text-amber-400 font-cinzel uppercase tracking-widest">
-          LIGHT UP PRAYER HOUSE • FAMILY OUTREACH
+      {/* Leaderboard Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        
+        {/* Faithful Attendees Column */}
+        <div className="p-5 rounded-3xl bg-purple-950/70 border border-purple-800/80 shadow-xl space-y-3">
+          <div className="flex items-center gap-2 pb-2 border-b border-purple-800/80">
+            <Award className="w-5 h-5 text-amber-400" />
+            <div>
+              <h4 className="text-sm font-extrabold text-amber-100 font-cinzel">
+                Top Faithful Attendees (High Turnout)
+              </h4>
+              <p className="text-[10px] text-purple-300">Consistent members in morning devotionals</p>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {faithfulMembers.map((m, idx) => (
+              <div
+                key={idx}
+                className="p-2.5 rounded-xl bg-purple-900/30 border border-purple-800/60 flex items-center justify-between text-xs"
+              >
+                <div>
+                  <div className="font-bold text-amber-100">{m.fullName}</div>
+                  <div className="text-[10px] text-purple-300 font-mono">{m.phoneNumber} • {m.category}</div>
+                </div>
+                <div className="text-right">
+                  <span className="text-sm font-black font-cinzel text-emerald-400">{m.rate}%</span>
+                  <div className="text-[10px] text-emerald-300/80 font-mono">{m.presentCount} present</div>
+                </div>
+              </div>
+            ))}
+
+            {faithfulMembers.length === 0 && (
+              <div className="p-6 text-center text-xs text-purple-400 italic">
+                No attendance sessions recorded yet.
+              </div>
+            )}
+          </div>
         </div>
-        <div className="text-sm font-semibold text-white">
-          OFFICIAL TRANSPARENCY &amp; FINANCIAL AUDIT STATEMENT
+
+        {/* Absentees Follow-up Alert Column */}
+        <div className="p-5 rounded-3xl bg-purple-950/70 border border-purple-800/80 shadow-xl space-y-3">
+          <div className="flex items-center gap-2 pb-2 border-b border-purple-800/80">
+            <AlertTriangle className="w-5 h-5 text-rose-400" />
+            <div>
+              <h4 className="text-sm font-extrabold text-amber-100 font-cinzel">
+                Absentee Follow-Up Watchlist
+              </h4>
+              <p className="text-[10px] text-purple-300">Members with multiple absences needing prayer &amp; check-in</p>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {absenteeAlerts.map((m, idx) => (
+              <div
+                key={idx}
+                className="p-2.5 rounded-xl bg-rose-950/20 border border-rose-900/60 flex items-center justify-between text-xs"
+              >
+                <div>
+                  <div className="font-bold text-rose-200">{m.fullName}</div>
+                  <div className="text-[10px] text-rose-300/80 font-mono">{m.phoneNumber} • {m.category}</div>
+                </div>
+                <div className="text-right">
+                  <span className="text-xs font-bold px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                    🔴 {m.absentCount} Absent
+                  </span>
+                  <div className="text-[10px] text-purple-300 font-mono mt-0.5">{m.rate}% rate</div>
+                </div>
+              </div>
+            ))}
+
+            {absenteeAlerts.length === 0 && (
+              <div className="p-6 text-center text-xs text-purple-400 italic">
+                All members are currently attending faithfully!
+              </div>
+            )}
+          </div>
         </div>
-        <p className="text-xs text-purple-200/80 max-w-2xl mx-auto italic">
-          All airtime distribution records contained herein represent direct blessing gifts disbaled to members, widows, youths, elderly, and visitors. Every record is stored with verifiable screenshot proof and receipt documentation.
-        </p>
-        <div className="pt-2 text-[11px] text-amber-300/80">
-          Certified by Ministry Leadership • Generated on {new Date().toLocaleDateString()}
-        </div>
+
       </div>
+
     </div>
   );
 };

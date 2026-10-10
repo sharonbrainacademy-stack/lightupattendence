@@ -12,7 +12,7 @@ interface HeaderProps {
   onSwitchGroupDirect?: (group: MinistryGroup) => void;
   onOpenAdminModal: () => void;
   onLogout: () => void;
-  onSelectTab: (tab: 'dashboard' | 'beneficiaries' | 'attendance' | 'bulk_msg' | 'distribution' | 'records' | 'reports') => void;
+  onSelectTab: (tab: 'dashboard' | 'beneficiaries' | 'attendance' | 'bulk_msg' | 'records' | 'reports') => void;
   activeTab: string;
 }
 
@@ -189,19 +189,7 @@ export const Header: React.FC<HeaderProps> = ({
                 : 'text-purple-200 hover:bg-purple-900/50 hover:text-amber-300'
             }`}
           >
-            🏠 Public Summary
-          </button>
-
-          <button
-            onClick={() => onSelectTab('beneficiaries')}
-            className={`px-3.5 py-2 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-              activeTab === 'beneficiaries'
-                ? 'bg-amber-500 text-purple-950 font-bold shadow-md shadow-amber-500/20'
-                : 'text-purple-200 hover:bg-purple-900/50 hover:text-amber-300'
-            }`}
-          >
-            <span>👥 Beneficiary Directory</span>
-            {!isAuthenticated && <Lock className="w-3 h-3 text-amber-400/80 inline ml-0.5" />}
+            🏠 Overview
           </button>
 
           <button
@@ -217,30 +205,6 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           <button
-            onClick={() => onSelectTab('bulk_msg')}
-            className={`px-3.5 py-2 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-              activeTab === 'bulk_msg'
-                ? 'bg-amber-500 text-purple-950 font-bold shadow-md shadow-amber-500/20'
-                : 'text-purple-200 hover:bg-purple-900/50 hover:text-amber-300'
-            }`}
-          >
-            <span>💬 Bulk Follow-Up</span>
-            {!isAuthenticated && <Lock className="w-3 h-3 text-amber-400/80 inline ml-0.5" />}
-          </button>
-
-          <button
-            onClick={() => onSelectTab('distribution')}
-            className={`px-3.5 py-2 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-              activeTab === 'distribution'
-                ? 'bg-amber-500 text-purple-950 font-bold shadow-md shadow-amber-500/20'
-                : 'text-purple-200 hover:bg-purple-900/50 hover:text-amber-300'
-            }`}
-          >
-            <span>📲 New Airtime Transfer</span>
-            {!isAuthenticated && <Lock className="w-3 h-3 text-amber-400/80 inline ml-0.5" />}
-          </button>
-
-          <button
             onClick={() => onSelectTab('records')}
             className={`px-3.5 py-2 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
               activeTab === 'records'
@@ -248,7 +212,31 @@ export const Header: React.FC<HeaderProps> = ({
                 : 'text-purple-200 hover:bg-purple-900/50 hover:text-amber-300'
             }`}
           >
-            📋 Records &amp; Evidence
+            📋 Attendance Records &amp; Archives
+          </button>
+
+          <button
+            onClick={() => onSelectTab('beneficiaries')}
+            className={`px-3.5 py-2 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+              activeTab === 'beneficiaries'
+                ? 'bg-amber-500 text-purple-950 font-bold shadow-md shadow-amber-500/20'
+                : 'text-purple-200 hover:bg-purple-900/50 hover:text-amber-300'
+            }`}
+          >
+            <span>👥 Member Directory</span>
+            {!isAuthenticated && <Lock className="w-3 h-3 text-amber-400/80 inline ml-0.5" />}
+          </button>
+
+          <button
+            onClick={() => onSelectTab('bulk_msg')}
+            className={`px-3.5 py-2 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+              activeTab === 'bulk_msg'
+                ? 'bg-amber-500 text-purple-950 font-bold shadow-md shadow-amber-500/20'
+                : 'text-purple-200 hover:bg-purple-900/50 hover:text-amber-300'
+            }`}
+          >
+            <span>💬 Absent Follow-Up</span>
+            {!isAuthenticated && <Lock className="w-3 h-3 text-amber-400/80 inline ml-0.5" />}
           </button>
 
           <button
@@ -259,7 +247,7 @@ export const Header: React.FC<HeaderProps> = ({
                 : 'text-purple-200 hover:bg-purple-900/50 hover:text-amber-300'
             }`}
           >
-            📊 Ministry Audit &amp; Reports
+            📊 Attendance Reports
           </button>
         </nav>
       </div>
