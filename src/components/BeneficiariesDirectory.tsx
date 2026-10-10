@@ -364,18 +364,20 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
                 >
                   <span>🌸 Esther Group</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => onSwitchGroupDirect('Peace Group')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
-                    activeGroup === 'Peace Group'
-                      ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-md'
-                      : 'text-purple-300 hover:text-white'
-                  }`}
-                  title="Switch to Peace Group"
-                >
-                  <span>🕊️ Peace Group</span>
-                </button>
+                {(beneficiaries || []).some(b => b.category === 'Peace Group') && (
+                  <button
+                    type="button"
+                    onClick={() => onSwitchGroupDirect('Peace Group')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                      activeGroup === 'Peace Group'
+                        ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-md'
+                        : 'text-purple-300 hover:text-white'
+                    }`}
+                    title="Switch to Peace Group"
+                  >
+                    <span>🕊️ Peace Group</span>
+                  </button>
+                )}
               </div>
             )}
 

@@ -1,28 +1,18 @@
-const CACHE_NAME = 'lightup-cache-v1';
-const ASSETS_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/icon-192.png',
-  '/icon-512.png'
-];
+const CACHE_NAME = 'lightup-cache-v3-fresh';
 
-// Install Event: Cache critical offline shell assets
+// Install Event: Activate immediately
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
-    }).then(() => self.skipWaiting())
-  );
+  self.skipWaiting();
 });
 
-// Activate Event: Clear outdated caches and claim clients
+// Activate Event: Clear ALL previous outdated caches and claim clients immediately
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((name) => {
           if (name !== CACHE_NAME) {
+            console.log('[ServiceWorker] Purging stale cache:', name);
             return caches.delete(name);
           }
         })
@@ -31,20 +21,45 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch Event: Network-first with cache fallback when offline
+// Message listener to trigger immediate skip waiting
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
+// Fetch Event: Network-first, strictly avoiding caching HTML documents so web updates always show
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
-  // Do not attempt to cache Firebase WebSocket or API calls
   const url = new URL(event.request.url);
-  if (url.hostname.includes('firestore.googleapis.com') || url.hostname.includes('firebaseio.com') || url.pathname.includes('/api/')) {
+
+  // Bypass service worker for Firebase, WebSocket, APIs, or dev endpoints
+  if (
+    url.hostname.includes('firestore.googleapis.com') ||
+    url.hostname.includes('firebaseio.com') ||
+    url.pathname.includes('/api/') ||
+    url.pathname.includes('/@vite/') ||
+    url.pathname.includes('/@fs/')
+  ) {
     return;
   }
 
+  // HTML / Navigation requests: ALWAYS fetch fresh from network! Never serve stale HTML!
+  if (event.request.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('.html')) {
+    event.respondWith(
+      fetch(event.request).catch(() => {
+        return caches.match('/index.html');
+      })
+    );
+    return;
+  }
+
+  // Static assets (images, icons, fonts): Network-first
   event.respondWith(
     fetch(event.request)
       .then((networkResponse) => {
-        if (networkResponse && (networkResponse.status === 200 || networkResponse.type === 'opaque')) {
+        if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
           const responseClone = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
             cache.put(event.request, responseClone);
@@ -53,14 +68,7 @@ self.addEventListener('fetch', (event) => {
         return networkResponse;
       })
       .catch(() => {
-        return caches.match(event.request).then((cachedResponse) => {
-          if (cachedResponse) {
-            return cachedResponse;
-          }
-          if (event.request.mode === 'navigate') {
-            return caches.match('/index.html');
-          }
-        });
+        return caches.match(event.request);
       })
   );
 });

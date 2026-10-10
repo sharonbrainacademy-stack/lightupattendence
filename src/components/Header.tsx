@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Flame, Shield, UserCheck, Wifi, WifiOff, Key, Database, BookOpen, ArrowRightLeft, Lock, LogOut, ShieldAlert, CheckCircle2 } from 'lucide-react';
+import { Flame, Shield, UserCheck, Wifi, WifiOff, Key, Database, BookOpen, ArrowRightLeft, Lock, LogOut, ShieldAlert, CheckCircle2, RefreshCw } from 'lucide-react';
 import { UserRole, MinistryGroup } from '../types';
 import { PWAInstallPrompt } from './PWAInstallPrompt';
 
@@ -14,6 +14,7 @@ interface HeaderProps {
   onLogout: () => void;
   onSelectTab: (tab: 'dashboard' | 'beneficiaries' | 'attendance' | 'bulk_msg' | 'records' | 'reports') => void;
   activeTab: string;
+  onForceRefreshApp?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -27,6 +28,7 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   onSelectTab,
   activeTab,
+  onForceRefreshApp,
 }) => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
@@ -94,20 +96,18 @@ export const Header: React.FC<HeaderProps> = ({
                 }`}
                 title="Switch view to Esther Group (Benin)"
               >
-                <span>🌸 Esther Group</span>
+                <span>🌸 Esther Group (Benin)</span>
               </button>
-              <button
-                type="button"
-                onClick={() => onSwitchGroupDirect ? onSwitchGroupDirect('Peace Group') : onOpenGroupSwitchModal()}
-                className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeGroup === 'Peace Group'
-                    ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-md ring-1 ring-emerald-300'
-                    : 'text-purple-300 hover:text-white hover:bg-purple-800/50'
-                }`}
-                title="Switch view to Peace Group"
-              >
-                <span>🕊️ Peace Group</span>
-              </button>
+              {activeGroup === 'Peace Group' && (
+                <button
+                  type="button"
+                  onClick={() => onSwitchGroupDirect ? onSwitchGroupDirect('Peace Group') : onOpenGroupSwitchModal()}
+                  className="px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-md ring-1 ring-emerald-300"
+                  title="Switch view to Peace Group"
+                >
+                  <span>🕊️ Peace Group</span>
+                </button>
+              )}
             </div>
 
             {/* Group Admin Auth Mode Pill */}
@@ -144,6 +144,19 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* PWA Install Button */}
             <PWAInstallPrompt />
+
+            {/* Force Sync & Web Refresh Button */}
+            {onForceRefreshApp && (
+              <button
+                type="button"
+                onClick={onForceRefreshApp}
+                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-xl bg-purple-900/80 hover:bg-purple-800 text-amber-300 border border-amber-500/40 shadow-sm cursor-pointer transition-all hover:scale-105"
+                title="Force refresh web app, purge stale cache, and pull latest updates from server"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline font-bold">Sync &amp; Refresh Web</span>
+              </button>
+            )}
 
             {/* Network Status Badge */}
             <div className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border ${isOnline ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' : 'bg-amber-500/20 text-amber-200 border-amber-500/40'}`}>

@@ -3047,18 +3047,20 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
                   <span className="text-[10px] opacity-90 font-mono">({getDeduplicatedBeneficiaries(beneficiaries, 'Esther Group').length})</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => setExportTargetGroup('Peace Group')}
-                  className={`py-2 px-2 rounded-xl text-xs font-bold transition-all flex flex-col sm:flex-row items-center justify-center gap-1 border cursor-pointer ${
-                    exportTargetGroup === 'Peace Group'
-                      ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white border-emerald-400 font-black shadow-lg ring-2 ring-emerald-400/50'
-                      : 'bg-purple-950/60 text-purple-200 border-purple-700 hover:bg-purple-900/80 hover:text-white'
-                  }`}
-                >
-                  <span>🕊️ Peace Group</span>
-                  <span className="text-[10px] opacity-90 font-mono">({getDeduplicatedBeneficiaries(beneficiaries, 'Peace Group').length})</span>
-                </button>
+                {getDeduplicatedBeneficiaries(beneficiaries, 'Peace Group').length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setExportTargetGroup('Peace Group')}
+                    className={`py-2 px-2 rounded-xl text-xs font-bold transition-all flex flex-col sm:flex-row items-center justify-center gap-1 border cursor-pointer ${
+                      exportTargetGroup === 'Peace Group'
+                        ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white border-emerald-400 font-black shadow-lg ring-2 ring-emerald-400/50'
+                        : 'bg-purple-950/60 text-purple-200 border-purple-700 hover:bg-purple-900/80 hover:text-white'
+                    }`}
+                  >
+                    <span>🕊️ Peace Group</span>
+                    <span className="text-[10px] opacity-90 font-mono">({getDeduplicatedBeneficiaries(beneficiaries, 'Peace Group').length})</span>
+                  </button>
+                )}
 
                 <button
                   type="button"

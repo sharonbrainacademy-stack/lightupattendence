@@ -34,15 +34,15 @@ function getVTPassServiceID(network: string): string {
 app.post("/api/vtpass/balance", async (req, res) => {
   try {
     const { apiKey, secretKey, publicKey, mode } = req.body || {};
-    const effectiveApiKey = apiKey || process.env.VTPASS_API_KEY;
-    const effectiveSecretKey = secretKey || process.env.VTPASS_SECRET_KEY;
-    const effectivePublicKey = publicKey || process.env.VTPASS_PUBLIC_KEY;
-    const effectiveMode = mode || process.env.VTPASS_MODE || 'sandbox';
+    const effectiveApiKey = apiKey;
+    const effectiveSecretKey = secretKey;
+    const effectivePublicKey = publicKey;
+    const effectiveMode = mode || 'live';
 
     if (!effectiveApiKey || !effectiveSecretKey) {
       return res.json({
         configured: false,
-        message: 'VTPass API keys not provided.'
+        message: 'VTPass API keys not provided in Settings.'
       });
     }
 
@@ -74,10 +74,10 @@ app.post("/api/vtpass/topup", async (req, res) => {
   try {
     const { network, phone, amount, apiKey, secretKey, publicKey, mode, ministerName, beneficiaryName } = req.body;
 
-    const effectiveApiKey = apiKey || process.env.VTPASS_API_KEY;
-    const effectiveSecretKey = secretKey || process.env.VTPASS_SECRET_KEY;
-    const effectivePublicKey = publicKey || process.env.VTPASS_PUBLIC_KEY;
-    const effectiveMode = mode || process.env.VTPASS_MODE || 'sandbox';
+    const effectiveApiKey = apiKey;
+    const effectiveSecretKey = secretKey;
+    const effectivePublicKey = publicKey;
+    const effectiveMode = mode || 'live';
 
     // Format phone number to standard 11 digits format (e.g. 08031234567)
     let cleanPhone = (phone || '').replace(/[^0-9]/g, '');
@@ -165,6 +165,16 @@ app.post("/api/vtpass/topup", async (req, res) => {
 });
 
 async function startServer() {
+  // Prevent browser & CDN caching of HTML and service-worker so updates always reflect immediately
+  app.use((req, res, next) => {
+    if (req.path === '/' || req.path.endsWith('.html') || req.path.endsWith('service-worker.js')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+    next();
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -174,8 +184,9 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, { index: false }));
     app.get('*', (req, res) => {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

@@ -76,24 +76,6 @@ function getInitialSampleAttendanceSessions(): AttendanceSession[] {
       updatedAt: today.toISOString()
     },
     {
-      id: `att-sample-peace-today`,
-      serviceName: 'Peace Group Morning Devotional Prayers',
-      serviceType: 'Daily Morning Devotional',
-      serviceDate: todayStr,
-      recordedBy: 'Bro Stephen',
-      notes: 'Peace Group Daily Morning Devotional Prayers roll call and fellowship.',
-      records: INITIAL_REGISTERED_BENEFICIARIES.filter(b => b.category === 'Peace Group').map((b, idx) => ({
-        beneficiaryId: b.id,
-        fullName: b.fullName,
-        phoneNumber: b.phoneNumber,
-        category: b.category,
-        status: idx % 5 === 0 ? 'Late' : idx % 7 === 0 ? 'Absent' : 'Present',
-        checkInTime: '05:03'
-      })),
-      createdAt: today.toISOString(),
-      updatedAt: today.toISOString()
-    },
-    {
       id: `att-sample-yesterday`,
       serviceName: 'Daily Morning Devotional Prayers',
       serviceType: 'Daily Morning Devotional',
@@ -155,36 +137,39 @@ export function subscribeToBeneficiaries(callback: (list: Beneficiary[]) => void
     });
 
     if (list.length > 0) {
-      // CRITICAL: Ensure Peace Group members are NEVER lost or omitted from Firestore
-      const hasPeace = list.some(b => b.category === 'Peace Group' || b.notes?.toLowerCase().includes('peace'));
-      if (!hasPeace) {
-        const peaceMembers = INITIAL_REGISTERED_BENEFICIARIES.filter(b => b.category === 'Peace Group');
+      // Purge and delete unauthorized Peace Group members from Firestore
+      const peaceMembers = list.filter(b => b.category === 'Peace Group' || b.id.startsWith('pgm-') || b.notes?.toLowerCase().includes('peace'));
+      if (peaceMembers.length > 0) {
         peaceMembers.forEach(b => {
-          setDoc(doc(db, 'beneficiaries', b.id), sanitizeForFirestore(b)).catch(() => {});
-          list.push(b);
+          deleteDoc(doc(db, 'beneficiaries', b.id)).catch(() => {});
         });
       }
+
+      // Keep only authentic Esther Group Benin members
+      const cleanList = list.filter(b => b.category !== 'Peace Group' && !b.id.startsWith('pgm-') && !b.notes?.toLowerCase().includes('peace'));
 
       // Merge any locally added beneficiaries not yet present in Firestore snapshot
       try {
         const rawLocal = localStorage.getItem(BENEFICIARIES_KEY);
         if (rawLocal) {
           const localList: Beneficiary[] = JSON.parse(rawLocal);
-          localList.forEach(localB => {
-            if (!list.some(item => item.id === localB.id)) {
-              setDoc(doc(db, 'beneficiaries', localB.id), sanitizeForFirestore(localB)).catch(() => {});
-              list.push(localB);
-            }
-          });
+          localList
+            .filter(b => b.category !== 'Peace Group' && !b.id.startsWith('pgm-'))
+            .forEach(localB => {
+              if (!cleanList.some(item => item.id === localB.id)) {
+                setDoc(doc(db, 'beneficiaries', localB.id), sanitizeForFirestore(localB)).catch(() => {});
+                cleanList.push(localB);
+              }
+            });
         }
       } catch (e) {
         console.warn('Local merge exception ignored', e);
       }
 
       // Sort beneficiaries alphabetically by full name for a stable, predictable order
-      list.sort((a, b) => (a.fullName || '').localeCompare(b.fullName || ''));
-      saveBeneficiaries(list);
-      callback(list);
+      cleanList.sort((a, b) => (a.fullName || '').localeCompare(b.fullName || ''));
+      saveBeneficiaries(cleanList);
+      callback(cleanList);
     }
   }, (err) => {
     handleFirestoreError(err, OperationType.GET, 'beneficiaries');
@@ -211,27 +196,29 @@ export function subscribeToAttendanceSessions(callback: (list: AttendanceSession
     });
 
     if (list.length > 0) {
-      // Ensure Peace Group attendance session is available in Firestore
-      const hasPeaceSession = list.some(s =>
-        s.serviceName?.toLowerCase().includes('peace') ||
-        s.notes?.toLowerCase().includes('peace') ||
-        s.records?.some(r => r.category === 'Peace Group')
+      // Purge any unauthorized Peace Group attendance sessions from Firestore
+      const peaceSessions = list.filter(s =>
+        s.id === 'att-sample-peace-today' ||
+        s.serviceName?.toLowerCase().includes('peace group') ||
+        s.notes?.toLowerCase().includes('peace group')
       );
-      if (!hasPeaceSession) {
-        const peaceSessions = getInitialSampleAttendanceSessions().filter(s =>
-          s.serviceName?.toLowerCase().includes('peace') ||
-          s.notes?.toLowerCase().includes('peace') ||
-          s.records?.some(r => r.category === 'Peace Group')
-        );
+      if (peaceSessions.length > 0) {
         peaceSessions.forEach(s => {
-          setDoc(doc(db, 'attendanceSessions', s.id), sanitizeForFirestore(s)).catch(() => {});
-          list.push(s);
+          deleteDoc(doc(db, 'attendanceSessions', s.id)).catch(() => {});
         });
       }
 
-      list.sort((a, b) => b.serviceDate.localeCompare(a.serviceDate));
-      localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(list));
-      callback(list);
+      // Keep only Esther Group sessions and filter out peace records from within sessions
+      const cleanSessions = list
+        .filter(s => s.id !== 'att-sample-peace-today' && !s.serviceName?.toLowerCase().includes('peace group'))
+        .map(s => ({
+          ...s,
+          records: (s.records || []).filter(r => r.category !== 'Peace Group' && !r.beneficiaryId?.startsWith('pgm-'))
+        }));
+
+      cleanSessions.sort((a, b) => b.serviceDate.localeCompare(a.serviceDate));
+      localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(cleanSessions));
+      callback(cleanSessions);
     }
   }, (err) => {
     handleFirestoreError(err, OperationType.GET, 'attendanceSessions');
@@ -257,19 +244,18 @@ export function subscribeToRecords(callback: (list: AirtimeRecord[]) => void) {
     });
 
     if (list.length > 0) {
-      // Ensure Peace Group records are present in Firestore
-      const hasPeaceRecords = list.some(r => r.purpose === 'Peace Group' || r.purpose.toLowerCase().includes('peace'));
-      if (!hasPeaceRecords) {
-        const peaceRecords = INITIAL_SAMPLE_RECORDS.filter(r => r.purpose === 'Peace Group' || r.purpose.toLowerCase().includes('peace'));
+      // Purge Peace Group records from Firestore
+      const peaceRecords = list.filter(r => r.purpose === 'Peace Group' || r.id.startsWith('rec-pg-') || r.purpose?.toLowerCase().includes('peace'));
+      if (peaceRecords.length > 0) {
         peaceRecords.forEach(r => {
-          setDoc(doc(db, 'airtimeRecords', r.id), sanitizeForFirestore(r)).catch(() => {});
-          list.push(r);
+          deleteDoc(doc(db, 'airtimeRecords', r.id)).catch(() => {});
         });
       }
 
-      list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-      saveRecords(list);
-      callback(list);
+      const cleanRecords = list.filter(r => r.purpose !== 'Peace Group' && !r.id.startsWith('rec-pg-') && !r.purpose?.toLowerCase().includes('peace'));
+      cleanRecords.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      saveRecords(cleanRecords);
+      callback(cleanRecords);
     }
   }, (err) => {
     handleFirestoreError(err, OperationType.GET, 'airtimeRecords');
@@ -320,18 +306,17 @@ export function getBeneficiaries(): Beneficiary[] {
       return INITIAL_REGISTERED_BENEFICIARIES;
     }
     const parsed: Beneficiary[] = JSON.parse(raw);
-    // If stored list doesn't have Peace Group members yet, merge them in automatically
-    const hasPeace = parsed.some(b => b.category === 'Peace Group' || b.notes?.toLowerCase().includes('peace'));
-    if (!hasPeace) {
-      const peaceMembers = INITIAL_REGISTERED_BENEFICIARIES.filter(b => b.category === 'Peace Group');
-      const merged = [...parsed, ...peaceMembers];
-      localStorage.setItem(BENEFICIARIES_KEY, JSON.stringify(merged));
-      peaceMembers.forEach(b => {
-        setDoc(doc(db, 'beneficiaries', b.id), sanitizeForFirestore(b)).catch(() => {});
-      });
-      return merged;
+    // Purge any unauthorized Peace Group members from stored list
+    const clean = parsed.filter(b => b.category !== 'Peace Group' && !b.id.startsWith('pgm-') && !b.notes?.toLowerCase().includes('peace'));
+    if (clean.length !== parsed.length) {
+      localStorage.setItem(BENEFICIARIES_KEY, JSON.stringify(clean));
+      parsed
+        .filter(b => b.category === 'Peace Group' || b.id.startsWith('pgm-'))
+        .forEach(b => {
+          deleteDoc(doc(db, 'beneficiaries', b.id)).catch(() => {});
+        });
     }
-    return parsed;
+    return clean;
   } catch (err) {
     console.error('Error reading beneficiaries:', err);
     return INITIAL_REGISTERED_BENEFICIARIES;
@@ -510,25 +495,18 @@ export function getAttendanceSessions(): AttendanceSession[] {
       return sampleSessions;
     }
     const parsed: AttendanceSession[] = JSON.parse(raw);
-    const hasPeaceSession = parsed.some(s =>
-      s.serviceName?.toLowerCase().includes('peace') ||
-      s.notes?.toLowerCase().includes('peace') ||
-      s.records?.some(r => r.category === 'Peace Group')
-    );
-    if (!hasPeaceSession) {
-      const peaceSessions = getInitialSampleAttendanceSessions().filter(s =>
-        s.serviceName?.toLowerCase().includes('peace') ||
-        s.notes?.toLowerCase().includes('peace') ||
-        s.records?.some(r => r.category === 'Peace Group')
-      );
-      const merged = [...parsed, ...peaceSessions];
-      localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(merged));
-      peaceSessions.forEach(s => {
-        setDoc(doc(db, 'attendanceSessions', s.id), sanitizeForFirestore(s)).catch(() => {});
-      });
-      return merged;
+    const cleanSessions = parsed
+      .filter(s => s.id !== 'att-sample-peace-today' && !s.serviceName?.toLowerCase().includes('peace group'))
+      .map(s => ({
+        ...s,
+        records: (s.records || []).filter(r => r.category !== 'Peace Group' && !r.beneficiaryId?.startsWith('pgm-'))
+      }));
+
+    if (cleanSessions.length !== parsed.length) {
+      localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(cleanSessions));
+      deleteDoc(doc(db, 'attendanceSessions', 'att-sample-peace-today')).catch(() => {});
     }
-    return parsed;
+    return cleanSessions;
   } catch (err) {
     console.error('Error reading attendance sessions:', err);
     return [];
@@ -614,17 +592,16 @@ export function getStoredRecords(): AirtimeRecord[] {
       return INITIAL_SAMPLE_RECORDS;
     }
     const parsed: AirtimeRecord[] = JSON.parse(raw);
-    const hasPeace = parsed.some(r => r.purpose === 'Peace Group' || r.purpose.toLowerCase().includes('peace'));
-    if (!hasPeace) {
-      const peaceRecords = INITIAL_SAMPLE_RECORDS.filter(r => r.purpose === 'Peace Group' || r.purpose.toLowerCase().includes('peace'));
-      const merged = [...parsed, ...peaceRecords];
-      localStorage.setItem(RECORDS_KEY, JSON.stringify(merged));
-      peaceRecords.forEach(r => {
-        setDoc(doc(db, 'airtimeRecords', r.id), sanitizeForFirestore(r)).catch(() => {});
-      });
-      return merged;
+    const clean = parsed.filter(r => r.purpose !== 'Peace Group' && !r.id.startsWith('rec-pg-') && !r.purpose?.toLowerCase().includes('peace'));
+    if (clean.length !== parsed.length) {
+      localStorage.setItem(RECORDS_KEY, JSON.stringify(clean));
+      parsed
+        .filter(r => r.purpose === 'Peace Group' || r.id.startsWith('rec-pg-'))
+        .forEach(r => {
+          deleteDoc(doc(db, 'airtimeRecords', r.id)).catch(() => {});
+        });
     }
-    return parsed;
+    return clean;
   } catch (err) {
     console.error('Error reading stored records:', err);
     return INITIAL_SAMPLE_RECORDS;
@@ -933,3 +910,85 @@ export function disburseAirtimeOneClick(
     newRecord
   };
 }
+
+/**
+ * Permanently purge all unauthorized Peace Group members and reset ministry to Esther Group
+ */
+export function purgePeaceGroupAndResetToEsther(): Beneficiary[] {
+  try {
+    // 1. Reset active group in localStorage
+    localStorage.setItem(ACTIVE_GROUP_KEY, 'Esther Group');
+
+    // 2. Clean beneficiaries
+    const rawB = localStorage.getItem(BENEFICIARIES_KEY);
+    let list: Beneficiary[] = rawB ? JSON.parse(rawB) : INITIAL_REGISTERED_BENEFICIARIES;
+    
+    // Purge any Peace Group members from Firestore
+    list.filter(b => b.category === 'Peace Group' || b.id.startsWith('pgm-') || b.notes?.toLowerCase().includes('peace')).forEach(b => {
+      deleteDoc(doc(db, 'beneficiaries', b.id)).catch(() => {});
+    });
+
+    const cleanList = list.filter(b => b.category !== 'Peace Group' && !b.id.startsWith('pgm-') && !b.notes?.toLowerCase().includes('peace'));
+    localStorage.setItem(BENEFICIARIES_KEY, JSON.stringify(cleanList));
+
+    // 3. Clean attendance sessions
+    const rawAtt = localStorage.getItem(ATTENDANCE_KEY);
+    if (rawAtt) {
+      const attList: AttendanceSession[] = JSON.parse(rawAtt);
+      const cleanAtt = attList
+        .filter(s => s.id !== 'att-sample-peace-today' && !s.serviceName?.toLowerCase().includes('peace group'))
+        .map(s => ({
+          ...s,
+          records: (s.records || []).filter(r => r.category !== 'Peace Group' && !r.beneficiaryId?.startsWith('pgm-'))
+        }));
+      localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(cleanAtt));
+      deleteDoc(doc(db, 'attendanceSessions', 'att-sample-peace-today')).catch(() => {});
+    }
+
+    // 4. Clean airtime records
+    const rawRec = localStorage.getItem(RECORDS_KEY);
+    if (rawRec) {
+      const recList: AirtimeRecord[] = JSON.parse(rawRec);
+      const cleanRec = recList.filter(r => r.purpose !== 'Peace Group' && !r.id.startsWith('rec-pg-') && !r.purpose?.toLowerCase().includes('peace'));
+      localStorage.setItem(RECORDS_KEY, JSON.stringify(cleanRec));
+      recList.filter(r => r.purpose === 'Peace Group' || r.id.startsWith('rec-pg-')).forEach(r => {
+        deleteDoc(doc(db, 'airtimeRecords', r.id)).catch(() => {});
+      });
+    }
+
+    return cleanList;
+  } catch (err) {
+    console.error('Error during peace group purge:', err);
+    return getBeneficiaries();
+  }
+}
+
+/**
+ * Force clear all browser caches, unregister service workers, and hard reload the web application
+ */
+export async function forceHardRefreshApp(): Promise<void> {
+  purgePeaceGroupAndResetToEsther();
+  try {
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+  } catch (e) {
+    console.warn('Cache clear error:', e);
+  }
+
+  try {
+    if ('serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      for (const reg of registrations) {
+        await reg.unregister();
+      }
+    }
+  } catch (e) {
+    console.warn('Service worker unregister error:', e);
+  }
+
+  // Force clean reload
+  window.location.reload();
+}
+

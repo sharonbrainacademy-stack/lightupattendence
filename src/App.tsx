@@ -31,6 +31,8 @@ import {
   subscribeToAttendanceSessions,
   subscribeToAuditLogs,
   subscribeToBulkLogs,
+  purgePeaceGroupAndResetToEsther,
+  forceHardRefreshApp,
 } from './utils/storage';
 
 // Error Boundary to prevent dark blank screens on UI errors
@@ -127,9 +129,11 @@ export default function App() {
     setActiveTab(tab);
   };
 
-  // Load initial state and subscribe to real-time Cloud Firestore updates
+  // Load initial state, purge unauthorized peace group members, and subscribe to real-time Cloud Firestore updates
   useEffect(() => {
-    setBeneficiaries(getBeneficiaries());
+    // Purge any residual Peace Group members from local storage & Firestore
+    const cleanBeneficiaries = purgePeaceGroupAndResetToEsther();
+    setBeneficiaries(cleanBeneficiaries);
     setAttendanceSessions(getAttendanceSessions());
     setBulkLogs(getBulkMessageLogs());
     setAuditLogs(getAuditLogs());
@@ -227,6 +231,7 @@ export default function App() {
         onLogout={handleLogout}
         onSelectTab={handleSelectTab}
         activeTab={activeTab}
+        onForceRefreshApp={forceHardRefreshApp}
       />
 
       {/* Main Content Area */}
