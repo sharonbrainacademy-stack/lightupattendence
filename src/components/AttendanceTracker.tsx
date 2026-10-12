@@ -419,99 +419,126 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
         if (isPhoneMatch) {
           score = 100;
         } else if (lineCleanName.length >= 1) {
+          // Helper for single token matching (Strict: exactly 1 token to 1 token)
+          const matchSingleToken = (t1: string, t2: string): number => {
+            if (!t1 || !t2) return 0;
+            if (t1 === t2) return 98;
+            const a1 = t1.replace(/[^a-z0-9]/g, '');
+            const a2 = t2.replace(/[^a-z0-9]/g, '');
+            if (a1 && a2 && a1 === a2) return 98;
+            if (a1.length >= 4 && a2.length >= 4 && (a1.startsWith(a2) || a2.startsWith(a1))) return 92;
+            const sim = getSimilarity(t1, t2);
+            if (sim >= 0.85) return 85;
+            return 0;
+          };
+
+          // Helper for multi-word matching regardless of order of arrangement
           // STRICT RULE:
-          // A single name can match a single name, but a single name MUST NOT match a double/multi-name!
-          // e.g. "john" can match "john", but "john" CANNOT match "john doris", and "john doris" CANNOT match "john"!
-          if (isSingleNameLine && bObj.isMultiNameMember) {
-            // Single-name input MUST NOT match a double/multi-name member (e.g. "john" -> "john doris")
-            score = 0;
-          } else if (isMultiNameLine && bObj.isSingleNameMember) {
-            // Double/multi-name input MUST NOT match a single-name member (e.g. "john doris" -> "john")
-            score = 0;
-          } else if (isSingleNameLine && bObj.isSingleNameMember) {
-            // BOTH are single names: (e.g. input "john" and member "john")
-            const lineWord = lineTokens[0];
-            const memberWord = bObj.primaryTokens[0];
-            const lineAlpha = lineWord.replace(/[^a-z]/g, '');
-            const memberAlpha = memberWord.replace(/[^a-z]/g, '');
+          // A single name CANNOT match one of a group name (e.g. 'John' CANNOT match 'John Doris').
+          // One of a group name CANNOT match a single name (e.g. 'John Doris' CANNOT match 'John').
+          // Both input and target must be multi-word group names (>= 2 tokens) and match all words in any order.
+          const matchTokensAnyOrder = (inputTokens: string[], targetTokens: string[]): number => {
+            if (inputTokens.length < 2 || targetTokens.length < 2) return 0;
+            // Both sides must have the same word count so a partial name cannot match
+            if (inputTokens.length !== targetTokens.length) return 0;
 
-            if (lineWord === memberWord || (lineAlpha.length >= 3 && lineAlpha === memberAlpha)) {
-              score = 98; // Exact single-name match (e.g. "john" === "john")
-            } else if (getSimilarity(lineWord, memberWord) >= 0.85) {
-              score = 85; // Close single-name match (minor spelling variation)
-            } else {
-              // Check any single-name variant (e.g. single-word Zoom name or alias)
-              bObj.variants.forEach(variant => {
-                if (variant.tokens.length === 1) {
-                  const vWord = variant.tokens[0];
-                  const vAlpha = vWord.replace(/[^a-z]/g, '');
-                  if (lineWord === vWord || (lineAlpha.length >= 3 && lineAlpha === vAlpha)) {
-                    score = Math.max(score, 95);
-                  } else if (getSimilarity(lineWord, vWord) >= 0.85) {
-                    score = Math.max(score, 82);
-                  }
+            let matchedTargetCount = 0;
+            const usedInputIndices = new Set<number>();
+
+            targetTokens.forEach(tt => {
+              const ttAlpha = tt.replace(/[^a-z0-9]/g, '');
+              let foundIndex = -1;
+              for (let i = 0; i < inputTokens.length; i++) {
+                if (usedInputIndices.has(i)) continue;
+                const it = inputTokens[i];
+                const itAlpha = it.replace(/[^a-z0-9]/g, '');
+                if (
+                  tt === it ||
+                  (ttAlpha.length >= 3 && ttAlpha === itAlpha) ||
+                  (ttAlpha.length >= 4 && itAlpha.length >= 4 && (ttAlpha.startsWith(itAlpha) || itAlpha.startsWith(ttAlpha))) ||
+                  getSimilarity(tt, it) >= 0.85
+                ) {
+                  foundIndex = i;
+                  break;
                 }
-              });
+              }
+              if (foundIndex !== -1) {
+                usedInputIndices.add(foundIndex);
+                matchedTargetCount++;
+              }
+            });
+
+            if (matchedTargetCount === targetTokens.length) {
+              return 96; // All words of the group name matched in any order of arrangement!
             }
-          } else if (isMultiNameLine && bObj.isMultiNameMember) {
-            // BOTH are double/multi-names: (e.g. input "john doris" and member "john doris")
-            const lineAlphaOnly = lineCleanName.replace(/[^a-z]/g, '');
+            return 0;
+          };
 
-            bObj.variants.forEach(variant => {
-              // Multi-name inputs must only match multi-name variants (>= 2 tokens)
-              if (variant.tokens.length < 2) return;
+          // Check variants in order of priority:
+          // 1. Outside bracket variants
+          // 2. Inside bracket variants (used if outside bracket did not match)
+          // 3. Full name & aliases
+          let outsideMaxScore = 0;
+          let insideMaxScore = 0;
+          let otherMaxScore = 0;
 
-              let variantScore = 0;
-              const variantAlphaOnly = variant.cleanName.replace(/[^a-z]/g, '');
+          bObj.variants.forEach(variant => {
+            let variantScore = 0;
+            const isVariantSingle = variant.tokens.length === 1;
+            const isVariantMulti = variant.tokens.length >= 2;
 
-              // A. Exact string match with variant (98 points)
+            if (isSingleNameLine && isVariantSingle) {
+              // 1. Single name matches single name ONLY
+              variantScore = matchSingleToken(lineTokens[0], variant.tokens[0]);
+            } else if (isMultiNameLine && isVariantMulti) {
+              // 2. Multi-name matches multi-name regardless of order of arrangement
+              const lineAlphaOnly = lineCleanName.replace(/[^a-z0-9]/g, '');
+              const variantAlphaOnly = variant.cleanName.replace(/[^a-z0-9]/g, '');
+
               if (lineCleanName === variant.cleanName) {
                 variantScore = 98;
-              }
-              // B. Exact alpha-only match ignoring spaces, digits, and punctuation (98 points)
-              else if (lineAlphaOnly.length >= 4 && variantAlphaOnly.length >= 4 && lineAlphaOnly === variantAlphaOnly) {
+              } else if (lineAlphaOnly.length >= 4 && variantAlphaOnly.length >= 4 && lineAlphaOnly === variantAlphaOnly) {
                 variantScore = 98;
-              }
-              // C. Alpha Substring / Prefix match for truncated Zoom screen names (92 points)
-              else if (
-                lineAlphaOnly.length >= 6 && variantAlphaOnly.length >= 6 &&
-                (lineAlphaOnly.startsWith(variantAlphaOnly) || variantAlphaOnly.startsWith(lineAlphaOnly))
-              ) {
-                variantScore = 92;
               } else {
-                // Multi-word to Multi-word token matching
-                let matchedTokenCount = 0;
-
-                variant.tokens.forEach(vt => {
-                  const vtAlpha = vt.replace(/[^a-z]/g, '');
-                  const hasExactMatch = lineTokens.some(lt => {
-                    const ltAlpha = lt.replace(/[^a-z]/g, '');
-                    return vt === lt || (vtAlpha.length >= 3 && vtAlpha === ltAlpha);
-                  });
-                  const hasFuzzyMatch = lineTokens.some(lt => vt === lt || getSimilarity(vt, lt) >= 0.80);
-                  if (hasExactMatch || hasFuzzyMatch) {
-                    matchedTokenCount++;
-                  }
-                });
-
-                if (matchedTokenCount === variant.tokens.length) {
-                  // All words of member's name matched in line
-                  variantScore = 96;
-                } else if (matchedTokenCount >= 2 && variant.tokens.length >= 2) {
-                  // Multi-word partial match (at least 2 words matched)
-                  variantScore = 88;
-                } else if (matchedTokenCount >= 1 && variant.tokens.length === 2 && lineTokens.length === 2) {
+                // Token matching in any order of arrangement
+                const orderIndependentScore = matchTokensAnyOrder(lineTokens, variant.tokens);
+                if (orderIndependentScore > 0) {
+                  variantScore = orderIndependentScore;
+                } else if (
+                  lineTokens.length === variant.tokens.length &&
+                  lineAlphaOnly.length >= 6 && variantAlphaOnly.length >= 6 &&
+                  (lineAlphaOnly.startsWith(variantAlphaOnly) || variantAlphaOnly.startsWith(lineAlphaOnly))
+                ) {
+                  variantScore = 92;
+                } else if (lineTokens.length === variant.tokens.length) {
                   const fullSim = getSimilarity(lineCleanName, variant.cleanName);
-                  if (fullSim >= 0.75) {
+                  if (fullSim >= 0.85) {
                     variantScore = 80;
                   }
                 }
               }
+            } else {
+              // STRICT RULE: Single name CANNOT match a group name variant,
+              // and a group name CANNOT match a single name variant!
+              variantScore = 0;
+            }
 
-              if (variantScore > score) {
-                score = variantScore;
-              }
-            });
+            if (variant.type === 'outside') {
+              outsideMaxScore = Math.max(outsideMaxScore, variantScore);
+            } else if (variant.type === 'inside') {
+              insideMaxScore = Math.max(insideMaxScore, variantScore);
+            } else {
+              otherMaxScore = Math.max(otherMaxScore, variantScore);
+            }
+          });
+
+          // RULE: If outside bracket matches, use it. If not, use inside bracket or other variants!
+          if (outsideMaxScore >= 65) {
+            score = outsideMaxScore;
+          } else if (insideMaxScore >= 65) {
+            score = insideMaxScore;
+          } else {
+            score = Math.max(outsideMaxScore, insideMaxScore, otherMaxScore);
           }
         }
 
@@ -696,16 +723,32 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
     setExportTargetGroup(activeGroup === 'Peace Group' ? 'Peace Group' : 'Esther Group');
   }, [activeGroup]);
 
-  // Helper to trigger browser CSV file download
+  // Helper to trigger browser CSV file download with error handling & feedback
   const downloadCSVFile = (csvContent: string, fileName: string) => {
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', fileName);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    try {
+      const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        try {
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+        } catch (e) {
+          // ignore
+        }
+      }, 1500);
+      setSaveNotification(`✅ Export downloaded: ${fileName}`);
+      setTimeout(() => setSaveNotification(null), 4000);
+    } catch (err: any) {
+      console.error('CSV Export failed:', err);
+      setSaveNotification(`❌ Export failed: ${err?.message || 'Unable to download file'}`);
+      setTimeout(() => setSaveNotification(null), 5000);
+    }
   };
 
   // Deduplication helper to ensure all registered members are preserved with strict group filtering
@@ -1241,7 +1284,15 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
       y += 6;
     });
 
-    pdf.save(`LightUp_${fileGroupName}_Attendance_${serviceDate}.pdf`);
+    try {
+      pdf.save(`LightUp_${fileGroupName}_Attendance_${serviceDate}.pdf`);
+      setSaveNotification(`✅ PDF exported: LightUp_${fileGroupName}_Attendance_${serviceDate}.pdf`);
+      setTimeout(() => setSaveNotification(null), 4000);
+    } catch (err: any) {
+      console.error('PDF export failed:', err);
+      setSaveNotification(`❌ PDF export failed: ${err?.message || 'Unknown error'}`);
+      setTimeout(() => setSaveNotification(null), 5000);
+    }
     setIsExportModalOpen(false);
   };
 
@@ -1355,7 +1406,15 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
       y += 6;
     });
 
-    pdf.save(`LightUp_${fileGroupName}_Member_Summary_${todayStr}.pdf`);
+    try {
+      pdf.save(`LightUp_${fileGroupName}_Member_Summary_${todayStr}.pdf`);
+      setSaveNotification(`✅ PDF exported: LightUp_${fileGroupName}_Member_Summary_${todayStr}.pdf`);
+      setTimeout(() => setSaveNotification(null), 4000);
+    } catch (err: any) {
+      console.error('PDF export failed:', err);
+      setSaveNotification(`❌ PDF export failed: ${err?.message || 'Unknown error'}`);
+      setTimeout(() => setSaveNotification(null), 5000);
+    }
     setIsExportModalOpen(false);
   };
 
