@@ -22,6 +22,7 @@ import {
   addBeneficiary,
   updateBeneficiary,
   deleteBeneficiary,
+  batchDeleteBeneficiaries,
   getAttendanceSessions,
   saveAttendanceSession,
   deleteAttendanceSession,
@@ -201,6 +202,13 @@ export default function App() {
     setAuditLogs(getAuditLogs());
   };
 
+  // Batch Delete Beneficiaries Handler
+  const handleBatchDeleteBeneficiaries = (ids: string[]) => {
+    const updated = batchDeleteBeneficiaries(ids, currentUserName, currentRole);
+    setBeneficiaries(updated);
+    setAuditLogs(getAuditLogs());
+  };
+
   // Role change handler
   const handleRoleChanged = (newRole: UserRole, newName: string) => {
     setRoleState(newRole);
@@ -291,6 +299,7 @@ export default function App() {
             onAddBeneficiary={handleAddBeneficiary}
             onUpdateBeneficiary={handleUpdateBeneficiary}
             onDeleteBeneficiary={handleDeleteBeneficiary}
+            onBatchDeleteBeneficiaries={handleBatchDeleteBeneficiaries}
           />
         </div>
 

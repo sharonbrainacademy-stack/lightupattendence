@@ -15,9 +15,12 @@ import {
   ShieldCheck,
   TrendingUp,
   Eye,
-  Check
+  Check,
+  AlertTriangle,
+  ArrowRight
 } from 'lucide-react';
 import { AttendanceSession, Beneficiary, MinistryGroup } from '../types';
+import { findDuplicateBeneficiaries } from '../utils/duplicateDetector';
 
 interface DashboardProps {
   attendanceSessions?: AttendanceSession[];
@@ -91,6 +94,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
     .sort((a, b) => new Date(b.serviceDate).getTime() - new Date(a.serviceDate).getTime())
     .slice(0, 5);
 
+  const duplicateClusters = React.useMemo(() => findDuplicateBeneficiaries(beneficiaries || []), [beneficiaries]);
+  const totalDuplicateMembers = React.useMemo(
+    () => duplicateClusters.reduce((acc, c) => acc + c.duplicates.length, 0),
+    [duplicateClusters]
+  );
+
   return (
     <div className="space-y-6">
       
@@ -134,6 +143,37 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Duplicate Records Alert */}
+      {totalDuplicateMembers > 0 && (
+        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-950/90 via-purple-950 to-amber-950/80 border-2 border-amber-500/60 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-fadeIn">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-300 flex items-center justify-center shrink-0">
+              <AlertTriangle className="w-6 h-6 text-amber-400 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-sm font-extrabold text-white">
+                  ⚠️ Duplicate Member Records Detected ({totalDuplicateMembers})
+                </h4>
+                <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold">
+                  Attention Required
+                </span>
+              </div>
+              <p className="text-xs text-amber-200/90 mt-0.5">
+                We identified duplicate members sharing phone numbers or matching names/aliases. Review details and permanently delete redundant duplicates.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => onNavigate('beneficiaries')}
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-purple-950 font-black text-xs shadow-lg shadow-amber-500/20 flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+          >
+            <span>Review Duplicates in Directory</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Active Ministry Group Switcher Banner */}
       <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-purple-950/90 via-purple-900/70 to-indigo-950/90 border border-purple-700/80 shadow-lg flex flex-col md:flex-row items-center justify-between gap-4">

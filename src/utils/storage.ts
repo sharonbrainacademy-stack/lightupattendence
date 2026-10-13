@@ -40,6 +40,71 @@ const USER_NAME_KEY = 'lu_prayer_house_user_name_v1';
 const ACTIVE_GROUP_KEY = 'lu_prayer_house_active_group_v1';
 const GROUP_PASSWORDS_KEY = 'lu_prayer_house_group_passwords_v1';
 
+// Deletion registry keys to prevent resurrection of user-deleted records upon browser refresh or Firestore sync
+const DELETED_BENEFICIARIES_KEY = 'lu_prayer_house_deleted_beneficiaries_registry_v1';
+const DELETED_RECORDS_KEY = 'lu_prayer_house_deleted_records_registry_v1';
+const DELETED_SESSIONS_KEY = 'lu_prayer_house_deleted_sessions_registry_v1';
+
+export function getDeletedBeneficiaryIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_BENEFICIARIES_KEY);
+    if (!raw) return new Set();
+    return new Set(JSON.parse(raw));
+  } catch (e) {
+    return new Set();
+  }
+}
+
+export function recordDeletedBeneficiaryId(id: string): void {
+  try {
+    const set = getDeletedBeneficiaryIds();
+    set.add(id);
+    localStorage.setItem(DELETED_BENEFICIARIES_KEY, JSON.stringify(Array.from(set)));
+  } catch (e) {
+    console.error('Error recording deleted beneficiary ID:', e);
+  }
+}
+
+export function getDeletedRecordIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_RECORDS_KEY);
+    if (!raw) return new Set();
+    return new Set(JSON.parse(raw));
+  } catch (e) {
+    return new Set();
+  }
+}
+
+export function recordDeletedRecordId(id: string): void {
+  try {
+    const set = getDeletedRecordIds();
+    set.add(id);
+    localStorage.setItem(DELETED_RECORDS_KEY, JSON.stringify(Array.from(set)));
+  } catch (e) {
+    console.error('Error recording deleted record ID:', e);
+  }
+}
+
+export function getDeletedSessionIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_SESSIONS_KEY);
+    if (!raw) return new Set();
+    return new Set(JSON.parse(raw));
+  } catch (e) {
+    return new Set();
+  }
+}
+
+export function recordDeletedSessionId(id: string): void {
+  try {
+    const set = getDeletedSessionIds();
+    set.add(id);
+    localStorage.setItem(DELETED_SESSIONS_KEY, JSON.stringify(Array.from(set)));
+  } catch (e) {
+    console.error('Error recording deleted session ID:', e);
+  }
+}
+
 let isSeedingBeneficiaries = false;
 let isSeedingAttendance = false;
 let isSeedingRecords = false;
@@ -119,10 +184,13 @@ function getInitialSampleAttendanceSessions(): AttendanceSession[] {
 export function subscribeToBeneficiaries(callback: (list: Beneficiary[]) => void) {
   const colRef = collection(db, 'beneficiaries');
   return onSnapshot(colRef, (snapshot) => {
+    const deletedIds = getDeletedBeneficiaryIds();
+
     if (snapshot.empty && !isSeedingBeneficiaries) {
       isSeedingBeneficiaries = true;
       const localList = getBeneficiaries();
-      const initialList = localList.length > 0 ? localList : INITIAL_REGISTERED_BENEFICIARIES;
+      const initialList = (localList.length > 0 ? localList : INITIAL_REGISTERED_BENEFICIARIES)
+        .filter(b => !deletedIds.has(b.id));
       initialList.forEach(b => {
         setDoc(doc(db, 'beneficiaries', b.id), sanitizeForFirestore(b)).catch(err => handleFirestoreError(err, OperationType.WRITE, `beneficiaries/${b.id}`));
       });
@@ -133,7 +201,13 @@ export function subscribeToBeneficiaries(callback: (list: Beneficiary[]) => void
 
     const list: Beneficiary[] = [];
     snapshot.forEach(docSnap => {
-      list.push(docSnap.data() as Beneficiary);
+      const b = docSnap.data() as Beneficiary;
+      if (deletedIds.has(b.id)) {
+        // If an item was previously deleted by the user, ensure it is deleted in Firestore
+        deleteDoc(doc(db, 'beneficiaries', b.id)).catch(() => {});
+      } else {
+        list.push(b);
+      }
     });
 
     if (list.length > 0) {
@@ -145,16 +219,21 @@ export function subscribeToBeneficiaries(callback: (list: Beneficiary[]) => void
         });
       }
 
-      // Keep only authentic Esther Group Benin members
-      const cleanList = list.filter(b => b.category !== 'Peace Group' && !b.id.startsWith('pgm-') && !b.notes?.toLowerCase().includes('peace'));
+      // Keep only authentic Esther Group Benin members and exclude any deleted records
+      const cleanList = list.filter(b => 
+        !deletedIds.has(b.id) &&
+        b.category !== 'Peace Group' && 
+        !b.id.startsWith('pgm-') && 
+        !b.notes?.toLowerCase().includes('peace')
+      );
 
-      // Merge any locally added beneficiaries not yet present in Firestore snapshot
+      // Merge any locally added beneficiaries not yet present in Firestore snapshot (strictly ignoring deleted IDs)
       try {
         const rawLocal = localStorage.getItem(BENEFICIARIES_KEY);
         if (rawLocal) {
           const localList: Beneficiary[] = JSON.parse(rawLocal);
           localList
-            .filter(b => b.category !== 'Peace Group' && !b.id.startsWith('pgm-'))
+            .filter(b => !deletedIds.has(b.id) && b.category !== 'Peace Group' && !b.id.startsWith('pgm-'))
             .forEach(localB => {
               if (!cleanList.some(item => item.id === localB.id)) {
                 setDoc(doc(db, 'beneficiaries', localB.id), sanitizeForFirestore(localB)).catch(() => {});
@@ -300,18 +379,25 @@ export function subscribeToBulkLogs(callback: (list: BulkMessageLog[]) => void) 
 
 export function getBeneficiaries(): Beneficiary[] {
   try {
+    const deletedIds = getDeletedBeneficiaryIds();
     const raw = localStorage.getItem(BENEFICIARIES_KEY);
     if (!raw) {
-      localStorage.setItem(BENEFICIARIES_KEY, JSON.stringify(INITIAL_REGISTERED_BENEFICIARIES));
-      return INITIAL_REGISTERED_BENEFICIARIES;
+      const initial = INITIAL_REGISTERED_BENEFICIARIES.filter(b => !deletedIds.has(b.id));
+      localStorage.setItem(BENEFICIARIES_KEY, JSON.stringify(initial));
+      return initial;
     }
     const parsed: Beneficiary[] = JSON.parse(raw);
-    // Purge any unauthorized Peace Group members from stored list
-    const clean = parsed.filter(b => b.category !== 'Peace Group' && !b.id.startsWith('pgm-') && !b.notes?.toLowerCase().includes('peace'));
+    // Purge any unauthorized Peace Group members and any deleted records from stored list
+    const clean = parsed.filter(b => 
+      !deletedIds.has(b.id) &&
+      b.category !== 'Peace Group' && 
+      !b.id.startsWith('pgm-') && 
+      !b.notes?.toLowerCase().includes('peace')
+    );
     if (clean.length !== parsed.length) {
       localStorage.setItem(BENEFICIARIES_KEY, JSON.stringify(clean));
       parsed
-        .filter(b => b.category === 'Peace Group' || b.id.startsWith('pgm-'))
+        .filter(b => b.category === 'Peace Group' || b.id.startsWith('pgm-') || deletedIds.has(b.id))
         .forEach(b => {
           deleteDoc(doc(db, 'beneficiaries', b.id)).catch(() => {});
         });
@@ -319,7 +405,8 @@ export function getBeneficiaries(): Beneficiary[] {
     return clean;
   } catch (err) {
     console.error('Error reading beneficiaries:', err);
-    return INITIAL_REGISTERED_BENEFICIARIES;
+    const deletedIds = getDeletedBeneficiaryIds();
+    return INITIAL_REGISTERED_BENEFICIARIES.filter(b => !deletedIds.has(b.id));
   }
 }
 
@@ -462,6 +549,7 @@ export function updateBeneficiary(b: Beneficiary, user: string, role: UserRole):
 }
 
 export function deleteBeneficiary(id: string, user: string, role: UserRole): Beneficiary[] {
+  recordDeletedBeneficiaryId(id);
   const current = getBeneficiaries();
   const target = current.find(item => item.id === id);
   const updated = current.filter(item => item.id !== id);
@@ -477,9 +565,32 @@ export function deleteBeneficiary(id: string, user: string, role: UserRole): Ben
       user,
       role,
       action: 'DELETE',
-      details: `Removed beneficiary profile: ${target.fullName}`
+      details: `Removed beneficiary profile: ${target.fullName} (${target.phoneNumber})`
     });
   }
+
+  return updated;
+}
+
+export function batchDeleteBeneficiaries(ids: string[], user: string, role: UserRole): Beneficiary[] {
+  ids.forEach(id => recordDeletedBeneficiaryId(id));
+  const idSet = new Set(ids);
+  const current = getBeneficiaries();
+  const updated = current.filter(item => !idSet.has(item.id));
+  saveBeneficiaries(updated);
+
+  ids.forEach(id => {
+    deleteDoc(doc(db, 'beneficiaries', id)).catch(err => handleFirestoreError(err, OperationType.DELETE, `beneficiaries/${id}`));
+  });
+
+  addAuditLog({
+    id: `log-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    user,
+    role,
+    action: 'DELETE',
+    details: `Permanently deleted ${ids.length} duplicate member record(s)`
+  });
 
   return updated;
 }
@@ -556,6 +667,7 @@ function saveAttendanceSessionToLocalAndFirestore(session: AttendanceSession, up
 }
 
 export function deleteAttendanceSession(id: string, user: string, role: UserRole): AttendanceSession[] {
+  recordDeletedSessionId(id);
   const current = getAttendanceSessions();
   const target = current.find(s => s.id === id);
   const updated = current.filter(s => s.id !== id);
@@ -664,6 +776,7 @@ export function updateRecord(updatedRecord: AirtimeRecord, user: string, role: U
 }
 
 export function deleteRecord(recordId: string, user: string, role: UserRole): AirtimeRecord[] {
+  recordDeletedRecordId(recordId);
   const current = getStoredRecords();
   const target = current.find(r => r.id === recordId);
   const updated = current.filter(r => r.id !== recordId);
@@ -923,8 +1036,15 @@ export function purgePeaceGroupAndResetToEsther(): Beneficiary[] {
     localStorage.removeItem('lightup_attendance_draft_Esther Group');
     localStorage.removeItem('lightup_attendance_draft_Peace Group');
     
-    // Always enforce the exact official Esther Group roster (108 members)
-    const cleanList = INITIAL_REGISTERED_BENEFICIARIES;
+    // Clean beneficiaries while strictly preserving user deletions!
+    const deletedIds = getDeletedBeneficiaryIds();
+    const current = getBeneficiaries();
+    const cleanList = current.filter(b => 
+      !deletedIds.has(b.id) &&
+      b.category !== 'Peace Group' && 
+      !b.id.startsWith('pgm-') && 
+      !b.notes?.toLowerCase().includes('peace')
+    );
     localStorage.setItem(BENEFICIARIES_KEY, JSON.stringify(cleanList));
 
     // 3. Clean attendance sessions

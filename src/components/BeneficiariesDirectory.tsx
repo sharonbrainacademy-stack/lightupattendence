@@ -15,10 +15,18 @@ import {
   HelpCircle,
   Tag,
   Download,
-  FileSpreadsheet
+  FileSpreadsheet,
+  AlertTriangle
 } from 'lucide-react';
 import { Beneficiary, NetworkType, PurposeCategory, UserRole, MinistryGroup } from '../types';
 import { detectNigerianNetwork, formatPhoneNumber } from '../utils/networkDetector';
+import {
+  findDuplicateBeneficiaries,
+  getBeneficiaryDuplicateInfo,
+  normalizePhoneNumber,
+  areNamesDuplicateMatch
+} from '../utils/duplicateDetector';
+import { DuplicateRecordsModal } from './DuplicateRecordsModal';
 
 interface BeneficiariesDirectoryProps {
   beneficiaries: Beneficiary[];
@@ -30,6 +38,7 @@ interface BeneficiariesDirectoryProps {
   onAddBeneficiary: (b: Beneficiary) => void;
   onUpdateBeneficiary: (b: Beneficiary) => void;
   onDeleteBeneficiary: (id: string) => void;
+  onBatchDeleteBeneficiaries?: (ids: string[]) => void;
 }
 
 const CATEGORY_OPTIONS: PurposeCategory[] = [
@@ -54,10 +63,24 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
   onAddBeneficiary,
   onUpdateBeneficiary,
   onDeleteBeneficiary,
+  onBatchDeleteBeneficiaries,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [memberToDelete, setMemberToDelete] = useState<Beneficiary | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>(activeGroup);
+  const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(false);
+  const [isDuplicatesModalOpen, setIsDuplicatesModalOpen] = useState(false);
+
+  // Compute duplicate clusters in real-time
+  const duplicateClusters = useMemo(() => findDuplicateBeneficiaries(beneficiaries || []), [beneficiaries]);
+  const totalDuplicateRedundant = useMemo(
+    () => duplicateClusters.reduce((acc, c) => acc + c.duplicates.length, 0),
+    [duplicateClusters]
+  );
+  const totalDuplicateMembersCount = useMemo(
+    () => duplicateClusters.reduce((acc, c) => acc + c.allMembers.length, 0),
+    [duplicateClusters]
+  );
 
   // Automatically update selected category when active group changes
   React.useEffect(() => {
@@ -76,6 +99,26 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
   const [newZoomName, setNewZoomName] = useState('');
   const [newWhatsappName, setNewWhatsappName] = useState('');
 
+  // Real-time duplicate check for Add Member
+  const addDupeWarning = useMemo(() => {
+    if (!newName.trim() && !newPhone.trim()) return null;
+    if (newPhone.trim().length >= 7) {
+      const match = (beneficiaries || []).find(
+        b => normalizePhoneNumber(b.phoneNumber) === normalizePhoneNumber(newPhone)
+      );
+      if (match) {
+        return `Phone number ${newPhone} is already registered to "${match.fullName}" (${match.category}).`;
+      }
+    }
+    if (newName.trim().length >= 2) {
+      const match = (beneficiaries || []).find(b => areNamesDuplicateMatch(b.fullName, newName));
+      if (match) {
+        return `Name matches existing registered member "${match.fullName}" (${match.phoneNumber}).`;
+      }
+    }
+    return null;
+  }, [newName, newPhone, beneficiaries]);
+
   // Edit Member Modal State
   const [editingBeneficiary, setEditingBeneficiary] = useState<Beneficiary | null>(null);
   const [editName, setEditName] = useState('');
@@ -90,6 +133,28 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
   const [editAliases, setEditAliases] = useState('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [editSaveSuccessMsg, setEditSaveSuccessMsg] = useState<string | null>(null);
+
+  // Real-time duplicate check for Edit Member
+  const editDupeWarning = useMemo(() => {
+    if (!editingBeneficiary) return null;
+    if (editPhone.trim().length >= 7) {
+      const match = (beneficiaries || []).find(
+        b => b.id !== editingBeneficiary.id && normalizePhoneNumber(b.phoneNumber) === normalizePhoneNumber(editPhone)
+      );
+      if (match) {
+        return `Phone number ${editPhone} is already registered to "${match.fullName}".`;
+      }
+    }
+    if (editName.trim().length >= 2) {
+      const match = (beneficiaries || []).find(
+        b => b.id !== editingBeneficiary.id && areNamesDuplicateMatch(b.fullName, editName)
+      );
+      if (match) {
+        return `Name matches existing registered member "${match.fullName}".`;
+      }
+    }
+    return null;
+  }, [editingBeneficiary, editName, editPhone, beneficiaries]);
 
   // Auto detect network for phone input
   const handleNewPhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -227,6 +292,12 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
   // Filter members list strictly
   const filteredBeneficiaries = useMemo(() => {
     return (beneficiaries || []).filter((b) => {
+      // Duplicates-only filter toggle
+      if (showDuplicatesOnly) {
+        const info = getBeneficiaryDuplicateInfo(b.id, duplicateClusters);
+        if (!info.isDuplicate) return false;
+      }
+
       // Group filtering
       if (selectedCategory === 'Peace Group') {
         if (b.category !== 'Peace Group' && !b.notes?.toLowerCase().includes('peace')) {
@@ -252,7 +323,7 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
 
       return true;
     }).sort((a, b) => a.fullName.localeCompare(b.fullName));
-  }, [beneficiaries, selectedCategory, searchTerm]);
+  }, [beneficiaries, selectedCategory, searchTerm, showDuplicatesOnly, duplicateClusters]);
 
   // Export member roster to CSV with explicit group targeting
   const handleExportMembersCSV = (targetGroup?: 'Esther Group' | 'Peace Group' | 'ALL') => {
@@ -404,6 +475,55 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
         </div>
       </div>
 
+      {/* Real-time Duplicate Records Notification Banner */}
+      {duplicateClusters.length > 0 && (
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-950/90 via-purple-950 to-amber-950/80 border-2 border-amber-500/60 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-fadeIn">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-300 flex items-center justify-center shrink-0">
+              <AlertTriangle className="w-6 h-6 text-amber-400 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h4 className="text-sm font-extrabold text-white">
+                  ⚠️ Duplicate Member Records Detected
+                </h4>
+                <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-xs font-black border border-amber-400/40">
+                  {totalDuplicateRedundant} Redundant Duplicate{totalDuplicateRedundant === 1 ? '' : 's'}
+                </span>
+                <span className="text-[11px] text-purple-300 font-mono">
+                  ({duplicateClusters.length} cluster{duplicateClusters.length === 1 ? '' : 's'})
+                </span>
+              </div>
+              <p className="text-xs text-amber-200/90 mt-0.5">
+                We identified members with identical phone numbers or matching names/aliases. Review details and permanently delete redundant duplicates.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 w-full md:w-auto shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowDuplicatesOnly(!showDuplicatesOnly)}
+              className={`px-3 py-2 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
+                showDuplicatesOnly
+                  ? 'bg-rose-600 text-white border-rose-400 font-extrabold'
+                  : 'bg-purple-900/60 hover:bg-purple-800 text-amber-200 border-amber-500/40'
+              }`}
+            >
+              {showDuplicatesOnly ? 'Show All Members' : `Filter Table (${totalDuplicateMembersCount})`}
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsDuplicatesModalOpen(true)}
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-purple-950 font-black text-xs shadow-lg shadow-amber-500/30 flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Review &amp; Delete Duplicates</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Filter and Search Bar */}
       <div className="p-4 rounded-2xl bg-purple-950/60 border border-purple-800/70 space-y-3">
         <div className="flex flex-col md:flex-row items-center gap-3">
@@ -431,9 +551,12 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
           {/* Group Filter Buttons */}
           <div className="flex items-center gap-1.5 w-full md:w-auto overflow-x-auto no-scrollbar">
             <button
-              onClick={() => setSelectedCategory('ALL')}
+              onClick={() => {
+                setShowDuplicatesOnly(false);
+                setSelectedCategory('ALL');
+              }}
               className={`px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer transition-all border ${
-                selectedCategory === 'ALL'
+                selectedCategory === 'ALL' && !showDuplicatesOnly
                   ? 'bg-amber-500 text-purple-950 border-amber-400 font-extrabold shadow-md'
                   : 'bg-purple-900/40 text-purple-200 border-purple-700 hover:bg-purple-900/80'
               }`}
@@ -441,9 +564,12 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
               All Groups ({beneficiaries.length})
             </button>
             <button
-              onClick={() => setSelectedCategory('Esther Group')}
+              onClick={() => {
+                setShowDuplicatesOnly(false);
+                setSelectedCategory('Esther Group');
+              }}
               className={`px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer transition-all border ${
-                selectedCategory === 'Esther Group'
+                selectedCategory === 'Esther Group' && !showDuplicatesOnly
                   ? 'bg-pink-600 text-white border-pink-400 font-extrabold shadow-md'
                   : 'bg-purple-900/40 text-purple-200 border-purple-700 hover:bg-purple-900/80'
               }`}
@@ -451,15 +577,34 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
               🌸 Esther Group ({beneficiaries.filter(b => b.category !== 'Peace Group' && !b.notes?.toLowerCase().includes('peace')).length})
             </button>
             <button
-              onClick={() => setSelectedCategory('Peace Group')}
+              onClick={() => {
+                setShowDuplicatesOnly(false);
+                setSelectedCategory('Peace Group');
+              }}
               className={`px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer transition-all border ${
-                selectedCategory === 'Peace Group'
+                selectedCategory === 'Peace Group' && !showDuplicatesOnly
                   ? 'bg-emerald-600 text-white border-emerald-400 font-extrabold shadow-md'
                   : 'bg-purple-900/40 text-purple-200 border-purple-700 hover:bg-purple-900/80'
               }`}
             >
               🕊️ Peace Group ({beneficiaries.filter(b => b.category === 'Peace Group' || b.notes?.toLowerCase().includes('peace')).length})
             </button>
+
+            {totalDuplicateMembersCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowDuplicatesOnly(!showDuplicatesOnly)}
+                className={`px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer transition-all border flex items-center gap-1.5 ${
+                  showDuplicatesOnly
+                    ? 'bg-rose-600 text-white border-rose-400 font-extrabold shadow-md'
+                    : 'bg-amber-950/50 text-amber-300 border-amber-500/60 hover:bg-amber-900/60'
+                }`}
+                title="Filter table to only show records with duplicate phone or matching name"
+              >
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                <span>⚠️ Duplicates Only ({totalDuplicateMembersCount})</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -524,20 +669,46 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
               {filteredBeneficiaries.map((b, idx) => {
                 const isPeace = b.category === 'Peace Group' || b.notes?.toLowerCase().includes('peace');
                 const aliasesCount = (b.aliases || []).length;
+                const dupeInfo = getBeneficiaryDuplicateInfo(b.id, duplicateClusters);
 
                 return (
-                  <tr key={b.id} className="hover:bg-purple-900/30 transition-colors">
+                  <tr
+                    key={b.id}
+                    className={`transition-colors ${
+                      dupeInfo.isDuplicate
+                        ? 'bg-amber-950/25 hover:bg-amber-900/40 border-l-4 border-l-amber-500'
+                        : 'hover:bg-purple-900/30'
+                    }`}
+                  >
                     <td className="py-3 px-4 text-purple-400 font-mono">{idx + 1}</td>
                     
                     <td className="py-3 px-4">
-                      <div className="font-bold text-amber-100 text-sm">{b.fullName}</div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <div className="font-bold text-amber-100 text-sm">{b.fullName}</div>
+                        {dupeInfo.isDuplicate && (
+                          <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/25 border border-amber-500/50 text-amber-300 text-[10px] font-black"
+                            title={`Duplicate conflict with ${dupeInfo.matchingWith?.map(m => m.fullName).join(', ')} (${dupeInfo.cluster?.reasonLabel})`}
+                          >
+                            <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
+                            <span>⚠️ Duplicate</span>
+                          </span>
+                        )}
+                      </div>
                       {b.notes && (
                         <div className="text-[10px] text-purple-300 italic truncate max-w-xs">{b.notes}</div>
                       )}
                     </td>
 
                     <td className="py-3 px-4 font-mono text-purple-200">
-                      {b.phoneNumber}
+                      <div className="flex items-center gap-1 flex-wrap">
+                        <span>{b.phoneNumber}</span>
+                        {dupeInfo.cluster?.reasonType === 'SAME_PHONE' && (
+                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30" title="Phone is shared with another member">
+                            Shared Phone
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     <td className="py-3 px-4">
@@ -572,6 +743,18 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
 
                     <td className="py-3 px-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
+                        {dupeInfo.isDuplicate && currentRole === 'Admin' && (
+                          <button
+                            type="button"
+                            onClick={() => setMemberToDelete(b)}
+                            className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 active:scale-95 text-white font-extrabold text-[11px] flex items-center gap-1 cursor-pointer shadow-md shadow-rose-600/30"
+                            title={`Delete duplicate record for ${b.fullName}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Delete Dupe</span>
+                          </button>
+                        )}
+
                         <button
                           onClick={() => handleOpenWhatsAppChat(b)}
                           className="p-1.5 rounded-lg bg-emerald-950/60 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/60 cursor-pointer"
@@ -588,7 +771,7 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
 
-                        {currentRole === 'Admin' && (
+                        {currentRole === 'Admin' && !dupeInfo.isDuplicate && (
                           <button
                             onClick={() => setMemberToDelete(b)}
                             className="p-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/60 cursor-pointer"
@@ -656,6 +839,16 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
                   className="w-full px-3 py-2 rounded-xl bg-purple-900/40 border border-purple-700 text-purple-100 focus:outline-none focus:border-amber-400 font-mono"
                 />
               </div>
+
+              {addDupeWarning && (
+                <div className="p-3 rounded-xl bg-amber-950/80 border border-amber-500/50 text-amber-200 text-xs flex items-start gap-2 shadow-md animate-fadeIn">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-extrabold text-amber-300">Duplicate Record Notice: </span>
+                    <span>{addDupeWarning}</span>
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="block text-purple-300 font-bold mb-1">Ministry Group *</label>
@@ -772,6 +965,16 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
                 />
               </div>
 
+              {editDupeWarning && (
+                <div className="p-3 rounded-xl bg-amber-950/80 border border-amber-500/50 text-amber-200 text-xs flex items-start gap-2 shadow-md animate-fadeIn">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-extrabold text-amber-300">Duplicate Record Notice: </span>
+                    <span>{editDupeWarning}</span>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="block text-purple-300 font-bold mb-1">Ministry Group *</label>
                 <select
@@ -885,6 +1088,16 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
           </div>
         </div>
       )}
+
+      {/* Duplicate Records Inspector & Cleanup Modal */}
+      <DuplicateRecordsModal
+        isOpen={isDuplicatesModalOpen}
+        onClose={() => setIsDuplicatesModalOpen(false)}
+        beneficiaryDuplicates={duplicateClusters}
+        onDeleteBeneficiary={onDeleteBeneficiary}
+        onBatchDeleteBeneficiaries={onBatchDeleteBeneficiaries}
+        currentRole={currentRole}
+      />
 
     </div>
   );

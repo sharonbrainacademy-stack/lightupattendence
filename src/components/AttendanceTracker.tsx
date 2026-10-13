@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Calendar, UserCheck, UserX, Clock, CheckCircle2, Search, Filter, Sparkles, MessageSquare, History, Plus, Save, Trash2, ArrowRight, ShieldCheck, Download, Upload, FileText, X, AlertCircle, HelpCircle, Check, Zap, ArrowRightLeft } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { Beneficiary, AttendanceSession, AttendanceRecordItem, AttendanceStatus, UserRole, MinistryGroup } from '../types';
+import { findDuplicateAttendanceSessions } from '../utils/duplicateDetector';
 
 interface AttendanceTrackerProps {
   beneficiaries: Beneficiary[];
@@ -167,6 +168,12 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
     sessionId: null,
     title: ''
   });
+
+  // Identify duplicate attendance sessions
+  const duplicateSessions = useMemo(
+    () => findDuplicateAttendanceSessions(attendanceSessions),
+    [attendanceSessions]
+  );
 
   // Auto-Mark Attendance Modal via Text Paste / File Upload
   const [isAutoMarkModalOpen, setIsAutoMarkModalOpen] = useState(false);
@@ -2177,6 +2184,27 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
                 )}
               </div>
             </div>
+
+            {/* Duplicate Sessions Alert Banner */}
+            {duplicateSessions.length > 0 && (
+              <div className="p-3.5 rounded-xl bg-amber-950/80 border border-amber-500/50 text-amber-200 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md animate-fadeIn">
+                <div className="flex items-center gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                  <div>
+                    <span className="font-extrabold text-amber-300">⚠️ Duplicate Attendance Sessions Detected: </span>
+                    <span>
+                      Found {duplicateSessions.length} date(s) with multiple recorded registers for the same service ({duplicateSessions.map(d => `${d.serviceName} on ${d.serviceDate}`).join(', ')}). Switch to History or Records Library to delete duplicates.
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setViewMode('history')}
+                  className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-purple-950 font-extrabold text-xs cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  View History to Delete
+                </button>
+              </div>
+            )}
 
             <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
               <button
