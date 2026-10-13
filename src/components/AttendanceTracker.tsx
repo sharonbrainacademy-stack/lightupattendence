@@ -3,6 +3,7 @@ import { Calendar, UserCheck, UserX, Clock, CheckCircle2, Search, Filter, Sparkl
 import { jsPDF } from 'jspdf';
 import { Beneficiary, AttendanceSession, AttendanceRecordItem, AttendanceStatus, UserRole, MinistryGroup } from '../types';
 import { findDuplicateAttendanceSessions } from '../utils/duplicateDetector';
+import { processAttendanceText, AttendanceAutoMatchResult, cleanPastedLine, getSimilarity } from '../utils/attendanceMatcher';
 
 interface AttendanceTrackerProps {
   beneficiaries: Beneficiary[];
@@ -183,397 +184,44 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
   const [zoomText, setZoomText] = useState('');
   const [uploadFileName, setUploadFileName] = useState('');
   const [autoMarkAbsentSearch, setAutoMarkAbsentSearch] = useState('');
-  const [autoMatchResult, setAutoMatchResult] = useState<{
-    presentMembers: Beneficiary[];
-    absentMembers: Beneficiary[];
-    discardedEntries: string[];
-  } | null>(null);
-
-  // Precision Auto-Match Processor with Fuzzy Levenshtein & Token Similarity
-  const cleanLineName = (str: string): string => {
-    if (!str) return '';
-    return str
-      .toLowerCase()
-      // Strip line numbering e.g. "1.", "12)", "3 -"
-      .replace(/^\d+[\.\)\-]\s*/, '')
-      // Strip trailing/leading badges & titles
-      .replace(/\b(esg|esther group|esther group benin|agl|gl|lph|benin|branch)\b/gi, ' ')
-      .replace(/\b(sister|sis|brother|bro|mrs|mr|deaconess|deacon|pastor|evangelist|evang)\b/gi, ' ')
-      .replace(/\b(present|here|attended|zoom|online|checked in|time|am|pm)\b/gi, ' ')
-      .replace(/[^a-z0-9\s]/gi, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-  };
-
-  const getSimilarity = (s1: string, s2: string): number => {
-    if (!s1 || !s2) return 0;
-    if (s1 === s2) return 1.0;
-    const l1 = s1.length;
-    const l2 = s2.length;
-    if (s1.includes(s2) || s2.includes(s1)) {
-      const minLen = Math.min(l1, l2);
-      const maxLen = Math.max(l1, l2);
-      if (minLen >= 3) return minLen / maxLen;
-    }
-    const matrix: number[][] = Array(l2 + 1).fill(null).map(() => Array(l1 + 1).fill(0));
-    for (let i = 0; i <= l1; i++) matrix[0][i] = i;
-    for (let j = 0; j <= l2; j++) matrix[j][0] = j;
-
-    for (let j = 1; j <= l2; j++) {
-      for (let i = 1; i <= l1; i++) {
-        const indicator = s1[i - 1] === s2[j - 1] ? 0 : 1;
-        matrix[j][i] = Math.min(
-          matrix[j][i - 1] + 1,
-          matrix[j - 1][i] + 1,
-          matrix[j - 1][i - 1] + indicator
-        );
-      }
-    }
-    const distance = matrix[l2][l1];
-    const maxLen = Math.max(l1, l2);
-    return maxLen === 0 ? 1 : (maxLen - distance) / maxLen;
-  };
+  const [autoMatchResult, setAutoMatchResult] = useState<AttendanceAutoMatchResult | null>(null);
+  const [isQuickPasteOpen, setIsQuickPasteOpen] = useState(false);
+  const [quickPasteText, setQuickPasteText] = useState('');
 
   const handleProcessUploadText = (textToProcess: string) => {
     if (!textToProcess.trim()) {
       setAutoMatchResult(null);
       return;
     }
+    const result = processAttendanceText(textToProcess, beneficiaries);
+    setAutoMatchResult(result);
+  };
 
-    // Smart Multi-line & Multi-numbered list splitting
-    const rawLines: string[] = [];
-    const textLines = textToProcess.split(/[\r\n]+/);
+  const handleExecuteQuickPaste = () => {
+    if (!quickPasteText.trim()) return;
+    const result = processAttendanceText(quickPasteText, beneficiaries);
+    setAutoMatchResult(result);
 
-    textLines.forEach(line => {
-      const trimmed = line.trim();
-      if (!trimmed) return;
-
-      // Handle multi-numbered lines e.g. "1. Sis Mary 2. Bro John 3. Grace 08012345678"
-      const subItems = trimmed.split(/(?=\b\d{1,2}[\.\)\-]\s+[A-Za-z])/);
-      if (subItems.length > 1) {
-        subItems.forEach(item => {
-          const itemTrimmed = item.trim();
-          if (itemTrimmed) rawLines.push(itemTrimmed);
-        });
-      } else {
-        // Also split by semicolons or commas if no phone digits are attached
-        if (trimmed.includes(';') || (trimmed.includes(',') && !/\d{6,}/.test(trimmed))) {
-          const splitList = trimmed.split(/;|,/);
-          splitList.forEach(item => {
-            const itemTrimmed = item.trim();
-            if (itemTrimmed) rawLines.push(itemTrimmed);
-          });
-        } else {
-          rawLines.push(trimmed);
-        }
-      }
-    });
-
-    const matchedMemberIds = new Set<string>();
-    const discardedEntries: string[] = [];
-
-    const normalizePhone = (ph: string) => {
-      const digits = ph.replace(/[^0-9]/g, '');
-      if (digits.startsWith('234') && digits.length >= 12) {
-        return '0' + digits.slice(3);
-      }
-      return digits;
-    };
-
-    const cleanLineName = (str: string) => {
-      if (!str) return '';
-      return str
-        .toLowerCase()
-        // Strip line numbering e.g. "1.", "12)", "3 -"
-        .replace(/^\d+[\.\)\-]\s*/, '')
-        // Strip trailing/leading badges & titles
-        .replace(/\b(esg|esther group|esther group benin|agl|gl|lph|benin|branch)\b/gi, ' ')
-        .replace(/\b(sister|sis|brother|bro|mrs|mr|deaconess|deacon|pastor|evangelist|evang)\b/gi, ' ')
-        .replace(/\b(present|here|attended|zoom|online|checked in|time|am|pm)\b/gi, ' ')
-        .replace(/[^a-z0-9\s]/gi, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-    };
-
-    const cleanBeneficiaries = (beneficiaries || []).map(b => {
-      const bFullName = b?.fullName || '';
-      const bPhone = b?.phoneNumber || '';
-
-      // Extract bracket components (inside vs outside)
-      const insideTexts: string[] = [];
-      const bracketMatches = Array.from(bFullName.matchAll(/\(([^)]+)\)/g));
-      bracketMatches.forEach(m => {
-        if (m[1] && m[1].trim()) insideTexts.push(m[1].trim());
+    if (result.presentMembers.length > 0) {
+      const newMap: Record<string, AttendanceRecordItem> = { ...recordsMap };
+      result.presentMembers.forEach(m => {
+        newMap[m.id] = {
+          beneficiaryId: m.id,
+          fullName: m.fullName,
+          phoneNumber: m.phoneNumber,
+          category: m.category,
+          status: 'Present',
+          checkInTime: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+        };
       });
-      const outsideText = bFullName.replace(/\([^)]*\)/g, ' ').trim();
-
-      type NameVariant = {
-        type: 'outside' | 'inside' | 'full';
-        cleanName: string;
-        tokens: string[];
-      };
-
-      const variants: NameVariant[] = [];
-
-      // 1. Outside bracket variant (e.g. "Mrs J Imasuem" -> "j imasuem")
-      if (outsideText) {
-        const cName = cleanLineName(outsideText);
-        const tokens = cName.split(' ').filter(t => t.length >= 1);
-        if (cName) variants.push({ type: 'outside', cleanName: cName, tokens });
-      }
-
-      // 2. Inside bracket variant(s) (e.g. "Mrs Juliet Imasuen" -> "juliet imasuen")
-      insideTexts.forEach(inText => {
-        const cName = cleanLineName(inText);
-        const tokens = cName.split(' ').filter(t => t.length >= 1);
-        if (cName) variants.push({ type: 'inside', cleanName: cName, tokens });
-      });
-
-      // 3. Complete full name variant
-      const fullCleanName = cleanLineName(bFullName);
-      const fullTokens = fullCleanName.split(' ').filter(t => t.length >= 1);
-      if (fullCleanName && !variants.some(v => v.cleanName === fullCleanName)) {
-        variants.push({ type: 'full', cleanName: fullCleanName, tokens: fullTokens });
-      }
-
-      // 4. Zoom Screen Name variant
-      if (b?.zoomName) {
-        const cName = cleanLineName(b.zoomName);
-        const tokens = cName.split(' ').filter(t => t.length >= 1);
-        if (cName && !variants.some(v => v.cleanName === cName)) {
-          variants.push({ type: 'full', cleanName: cName, tokens });
-        }
-      }
-
-      // 5. WhatsApp Display Name variant
-      if (b?.whatsappName) {
-        const cName = cleanLineName(b.whatsappName);
-        const tokens = cName.split(' ').filter(t => t.length >= 1);
-        if (cName && !variants.some(v => v.cleanName === cName)) {
-          variants.push({ type: 'full', cleanName: cName, tokens });
-        }
-      }
-
-      // 6. Extra Aliases list
-      if (Array.isArray(b?.aliases)) {
-        b.aliases.forEach(aliasStr => {
-          if (!aliasStr) return;
-          const cName = cleanLineName(aliasStr);
-          const tokens = cName.split(' ').filter(t => t.length >= 1);
-          if (cName && !variants.some(v => v.cleanName === cName)) {
-            variants.push({ type: 'full', cleanName: cName, tokens });
-          }
-        });
-      }
-
-      const cleanPhone = normalizePhone(bPhone);
-      const shortPhone = cleanPhone.length >= 7 ? cleanPhone.slice(-7) : cleanPhone;
-      const rawDigits = bPhone.replace(/[^0-9]/g, '');
-      const noZeroPhone = cleanPhone.replace(/^0+/, '');
-
-      // Determine primary name tokens (outside brackets if available)
-      const primaryCleanName = cleanLineName(outsideText || bFullName);
-      const primaryTokens = primaryCleanName.split(' ').filter(t => t.length >= 1);
-      const isSingleNameMember = primaryTokens.length === 1;
-      const isMultiNameMember = primaryTokens.length >= 2;
-
-      return {
-        beneficiary: b,
-        cleanName: fullCleanName,
-        nameTokens: fullTokens,
-        primaryTokens,
-        isSingleNameMember,
-        isMultiNameMember,
-        variants,
-        cleanPhone,
-        shortPhone,
-        rawDigits,
-        noZeroPhone
-      };
-    });
-
-    rawLines.forEach(line => {
-      // Ignore long non-attendee headers
-      if (/ATTENDANCE|MEETING|DAILY PRAYER/i.test(line) && line.length > 35 && !/\d{10}/.test(line)) {
-        return;
-      }
-
-      const lineCleanName = cleanLineName(line);
-      const cleanLineDigits = normalizePhone(line);
-      const lineAllDigits = line.replace(/[^0-9]/g, '');
-      const linePhoneMatches = line.match(/\d{7,15}/g) || [];
-      const lineTokens = lineCleanName.split(' ').filter(t => t.length >= 1);
-      const isSingleNameLine = lineTokens.length === 1;
-      const isMultiNameLine = lineTokens.length >= 2;
-
-      let bestScore = 0;
-      let bestBId: string | null = null;
-
-      cleanBeneficiaries.forEach(bObj => {
-        let score = 0;
-
-        // 1. Phone number match (100 points) - supports exact phone, short phone, raw digits, or extracted phone sequences
-        const isPhoneMatch = (
-          (bObj.shortPhone && bObj.shortPhone.length >= 7 && (cleanLineDigits.includes(bObj.shortPhone) || lineAllDigits.includes(bObj.shortPhone))) ||
-          (bObj.cleanPhone && bObj.cleanPhone.length >= 8 && (cleanLineDigits.includes(bObj.cleanPhone) || lineAllDigits.includes(bObj.cleanPhone))) ||
-          (bObj.noZeroPhone && bObj.noZeroPhone.length >= 8 && lineAllDigits.includes(bObj.noZeroPhone)) ||
-          linePhoneMatches.some(pSeq => 
-            (bObj.shortPhone && pSeq.includes(bObj.shortPhone)) ||
-            (bObj.cleanPhone && (pSeq.includes(bObj.cleanPhone) || bObj.cleanPhone.includes(pSeq)))
-          )
-        );
-
-        if (isPhoneMatch) {
-          score = 100;
-        } else if (lineCleanName.length >= 1) {
-          // Helper for single token matching (Strict: exactly 1 token to 1 token)
-          const matchSingleToken = (t1: string, t2: string): number => {
-            if (!t1 || !t2) return 0;
-            if (t1 === t2) return 98;
-            const a1 = t1.replace(/[^a-z0-9]/g, '');
-            const a2 = t2.replace(/[^a-z0-9]/g, '');
-            if (a1 && a2 && a1 === a2) return 98;
-            if (a1.length >= 4 && a2.length >= 4 && (a1.startsWith(a2) || a2.startsWith(a1))) return 92;
-            const sim = getSimilarity(t1, t2);
-            if (sim >= 0.85) return 85;
-            return 0;
-          };
-
-          // Helper for multi-word matching regardless of order of arrangement
-          // STRICT RULE:
-          // A single name CANNOT match one of a group name (e.g. 'John' CANNOT match 'John Doris').
-          // One of a group name CANNOT match a single name (e.g. 'John Doris' CANNOT match 'John').
-          // Both input and target must be multi-word group names (>= 2 tokens) and match all words in any order.
-          const matchTokensAnyOrder = (inputTokens: string[], targetTokens: string[]): number => {
-            if (inputTokens.length < 2 || targetTokens.length < 2) return 0;
-            // Both sides must have the same word count so a partial name cannot match
-            if (inputTokens.length !== targetTokens.length) return 0;
-
-            let matchedTargetCount = 0;
-            const usedInputIndices = new Set<number>();
-
-            targetTokens.forEach(tt => {
-              const ttAlpha = tt.replace(/[^a-z0-9]/g, '');
-              let foundIndex = -1;
-              for (let i = 0; i < inputTokens.length; i++) {
-                if (usedInputIndices.has(i)) continue;
-                const it = inputTokens[i];
-                const itAlpha = it.replace(/[^a-z0-9]/g, '');
-                if (
-                  tt === it ||
-                  (ttAlpha.length >= 3 && ttAlpha === itAlpha) ||
-                  (ttAlpha.length >= 4 && itAlpha.length >= 4 && (ttAlpha.startsWith(itAlpha) || itAlpha.startsWith(ttAlpha))) ||
-                  getSimilarity(tt, it) >= 0.85
-                ) {
-                  foundIndex = i;
-                  break;
-                }
-              }
-              if (foundIndex !== -1) {
-                usedInputIndices.add(foundIndex);
-                matchedTargetCount++;
-              }
-            });
-
-            if (matchedTargetCount === targetTokens.length) {
-              return 96; // All words of the group name matched in any order of arrangement!
-            }
-            return 0;
-          };
-
-          // Check variants in order of priority:
-          // 1. Outside bracket variants
-          // 2. Inside bracket variants (used if outside bracket did not match)
-          // 3. Full name & aliases
-          let outsideMaxScore = 0;
-          let insideMaxScore = 0;
-          let otherMaxScore = 0;
-
-          bObj.variants.forEach(variant => {
-            let variantScore = 0;
-            const isVariantSingle = variant.tokens.length === 1;
-            const isVariantMulti = variant.tokens.length >= 2;
-
-            if (isSingleNameLine && isVariantSingle) {
-              // 1. Single name matches single name ONLY
-              variantScore = matchSingleToken(lineTokens[0], variant.tokens[0]);
-            } else if (isMultiNameLine && isVariantMulti) {
-              // 2. Multi-name matches multi-name regardless of order of arrangement
-              const lineAlphaOnly = lineCleanName.replace(/[^a-z0-9]/g, '');
-              const variantAlphaOnly = variant.cleanName.replace(/[^a-z0-9]/g, '');
-
-              if (lineCleanName === variant.cleanName) {
-                variantScore = 98;
-              } else if (lineAlphaOnly.length >= 4 && variantAlphaOnly.length >= 4 && lineAlphaOnly === variantAlphaOnly) {
-                variantScore = 98;
-              } else {
-                // Token matching in any order of arrangement
-                const orderIndependentScore = matchTokensAnyOrder(lineTokens, variant.tokens);
-                if (orderIndependentScore > 0) {
-                  variantScore = orderIndependentScore;
-                } else if (
-                  lineTokens.length === variant.tokens.length &&
-                  lineAlphaOnly.length >= 6 && variantAlphaOnly.length >= 6 &&
-                  (lineAlphaOnly.startsWith(variantAlphaOnly) || variantAlphaOnly.startsWith(lineAlphaOnly))
-                ) {
-                  variantScore = 92;
-                } else if (lineTokens.length === variant.tokens.length) {
-                  const fullSim = getSimilarity(lineCleanName, variant.cleanName);
-                  if (fullSim >= 0.85) {
-                    variantScore = 80;
-                  }
-                }
-              }
-            } else {
-              // STRICT RULE: Single name CANNOT match a group name variant,
-              // and a group name CANNOT match a single name variant!
-              variantScore = 0;
-            }
-
-            if (variant.type === 'outside') {
-              outsideMaxScore = Math.max(outsideMaxScore, variantScore);
-            } else if (variant.type === 'inside') {
-              insideMaxScore = Math.max(insideMaxScore, variantScore);
-            } else {
-              otherMaxScore = Math.max(otherMaxScore, variantScore);
-            }
-          });
-
-          // RULE: If outside bracket matches, use it. If not, use inside bracket or other variants!
-          if (outsideMaxScore >= 65) {
-            score = outsideMaxScore;
-          } else if (insideMaxScore >= 65) {
-            score = insideMaxScore;
-          } else {
-            score = Math.max(outsideMaxScore, insideMaxScore, otherMaxScore);
-          }
-        }
-
-        if (score > bestScore) {
-          bestScore = score;
-          bestBId = bObj.beneficiary.id;
-        }
-      });
-
-      // Require confidence score >= 65 to mark as present
-      if (bestBId && bestScore >= 65) {
-        matchedMemberIds.add(bestBId);
-      } else {
-        const displayLine = line.replace(/^\d+[\.\)\-]\s*/, '').trim();
-        if (displayLine.length > 1 && !/^\d+$/.test(displayLine)) {
-          discardedEntries.push(displayLine);
-        }
-      }
-    });
-
-    const presentMembers = beneficiaries.filter(b => matchedMemberIds.has(b.id));
-    const absentMembers = beneficiaries.filter(b => !matchedMemberIds.has(b.id));
-
-    setAutoMatchResult({
-      presentMembers,
-      absentMembers,
-      discardedEntries
-    });
+      setRecordsMap(newMap);
+      setSaveNotification(`⚡ Auto-Mark Success: Matched and marked ${result.presentMembers.length} attendees as Present!`);
+      setTimeout(() => setSaveNotification(null), 5000);
+      setQuickPasteText('');
+      setIsQuickPasteOpen(false);
+    } else {
+      setIsAutoMarkModalOpen(true);
+    }
   };
 
   // Force-match a discarded line to a specific beneficiary manually inside the Auto-Mark Modal & save as alias!
@@ -608,6 +256,7 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
     const newDiscarded = autoMatchResult.discardedEntries.filter((_, idx) => idx !== entryIndex);
 
     setAutoMatchResult({
+      ...autoMatchResult,
       presentMembers: newPresent,
       absentMembers: newAbsent,
       discardedEntries: newDiscarded
@@ -1869,6 +1518,15 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
             </button>
 
             <button
+              onClick={() => setIsQuickPasteOpen(!isQuickPasteOpen)}
+              className="px-3.5 py-2.5 rounded-2xl bg-purple-900/80 hover:bg-purple-800 text-amber-300 border border-purple-700 text-xs font-extrabold flex items-center gap-1.5 shadow-lg cursor-pointer transition-all"
+              title="Paste meeting attendees directly on this screen"
+            >
+              <FileText className="w-4 h-4 text-amber-400" />
+              <span>📋 Quick Paste</span>
+            </button>
+
+            <button
               onClick={() => setIsExportModalOpen(true)}
               className="px-4 py-2.5 rounded-2xl bg-purple-900/80 hover:bg-purple-800 text-amber-300 border border-purple-700 text-xs font-extrabold flex items-center gap-2 shadow-lg cursor-pointer"
               title="Download clean, organized attendance registers as CSV"
@@ -2198,7 +1856,7 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
                   </div>
                 </div>
                 <button
-                  onClick={() => setViewMode('history')}
+                  onClick={() => setActiveSubView('history')}
                   className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-purple-950 font-extrabold text-xs cursor-pointer whitespace-nowrap shrink-0"
                 >
                   View History to Delete
@@ -2417,6 +2075,61 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
             <Zap className="w-4 h-4 fill-purple-950" />
             <span>Review &amp; Remap {autoMatchResult.discardedEntries.length} Attendee{autoMatchResult.discardedEntries.length === 1 ? '' : 's'}</span>
           </button>
+        </div>
+      )}
+
+      {/* On-Page Quick Paste Attendance Section */}
+      {isQuickPasteOpen && (
+        <div className="p-4 rounded-2xl bg-purple-950/95 border-2 border-amber-500/60 shadow-2xl space-y-3 animate-fadeIn">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-amber-300 font-extrabold text-xs">
+              <Zap className="w-4 h-4 text-amber-400" />
+              <span>📋 Quick Paste Attendance Register (WhatsApp, Zoom, or Phone Numbers)</span>
+            </div>
+            <button
+              onClick={() => setIsQuickPasteOpen(false)}
+              className="p-1 rounded-lg text-purple-300 hover:text-white hover:bg-purple-900 cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <p className="text-[11px] text-purple-200/90 leading-tight">
+            Paste any meeting list from WhatsApp group prayers, Zoom participant logs, or phone numbers. The system automatically identifies members, removes chat timestamps, and marks them Present directly on this roll call.
+          </p>
+          <textarea
+            rows={4}
+            value={quickPasteText}
+            onChange={(e) => setQuickPasteText(e.target.value)}
+            placeholder="Paste attendee text here... e.g.&#10;1. Sis Juliet Imasuen 08065289904&#10;2. Joy Aghedo - Present&#10;3. Mrs Becky Ughede (Co-host)&#10;4. 08039463823"
+            className="w-full p-3 rounded-xl bg-purple-900/60 border border-purple-700 text-amber-100 text-xs font-mono focus:outline-none focus:border-amber-400 placeholder:text-purple-400/50"
+          />
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setIsAutoMarkModalOpen(true)}
+              className="text-[11px] text-amber-300 hover:text-amber-200 underline font-semibold cursor-pointer"
+            >
+              Need advanced dual WhatsApp + Zoom separate boxes? Open Advanced Modal &rarr;
+            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsQuickPasteOpen(false)}
+                className="px-3 py-1.5 rounded-xl bg-purple-900/60 hover:bg-purple-800 text-purple-200 text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteQuickPaste}
+                disabled={!quickPasteText.trim()}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-purple-950 font-black text-xs flex items-center gap-2 shadow-lg cursor-pointer disabled:opacity-50"
+              >
+                <Zap className="w-4 h-4 fill-purple-950" />
+                <span>⚡ Auto-Mark Attendees Now</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -2926,6 +2639,26 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
                   </span>
                 </h4>
 
+                {/* Instant Action Banner when members are matched */}
+                {autoMatchResult.presentMembers.length > 0 && (
+                  <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950 via-teal-950 to-purple-950 border border-emerald-500/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-emerald-200 shadow-xl">
+                    <div className="flex items-center gap-2.5 text-xs font-extrabold">
+                      <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                      <span>
+                        Found <strong className="text-white text-sm">{autoMatchResult.presentMembers.length}</strong> attendees present from your pasted list!
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleApplyAutoMatchToRollCall}
+                      className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 text-purple-950 font-black text-xs shadow-md cursor-pointer shrink-0 flex items-center gap-1.5"
+                    >
+                      <Check className="w-4 h-4 stroke-[3]" />
+                      <span>Apply {autoMatchResult.presentMembers.length} Present to Roll Call</span>
+                    </button>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   {/* Matched Present */}
                   <div className="p-3 rounded-xl bg-emerald-950/80 border border-emerald-700/80 space-y-2">
@@ -2933,20 +2666,30 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
                       <span>🟢 Matched Members (Present)</span>
                       <span className="text-sm font-black font-mono text-emerald-300">{autoMatchResult.presentMembers.length}</span>
                     </div>
-                    <div className="max-h-48 overflow-y-auto space-y-1 text-[11px] text-emerald-200 pr-1">
-                      {autoMatchResult.presentMembers.map(m => (
-                        <div key={m.id} className="flex items-center justify-between gap-1 p-1 rounded bg-emerald-900/40 border border-emerald-800/60">
-                          <span className="truncate">✓ {m.fullName}</span>
-                          <button
-                            type="button"
-                            onClick={() => handleToggleAutoMatchMemberStatus(m.id)}
-                            className="px-1.5 py-0.5 rounded text-[9px] bg-rose-950 text-rose-300 hover:bg-rose-900 border border-rose-700 cursor-pointer shrink-0 font-bold"
-                            title="Mark Absent"
-                          >
-                            Mark Absent
-                          </button>
-                        </div>
-                      ))}
+                    <div className="max-h-56 overflow-y-auto space-y-1.5 text-[11px] text-emerald-200 pr-1">
+                      {autoMatchResult.presentMembers.map(m => {
+                        const matchEntry = autoMatchResult.matchedEntries?.find(e => e.member.id === m.id);
+                        return (
+                          <div key={m.id} className="flex items-center justify-between gap-1 p-1.5 rounded-lg bg-emerald-900/40 border border-emerald-800/60">
+                            <div className="min-w-0 pr-1">
+                              <span className="truncate block font-bold text-white">✓ {m.fullName}</span>
+                              {matchEntry && (
+                                <span className="text-[9px] text-emerald-300/80 truncate block font-mono">
+                                  {matchEntry.reason}
+                                </span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleAutoMatchMemberStatus(m.id)}
+                              className="px-1.5 py-0.5 rounded text-[9px] bg-rose-950 text-rose-300 hover:bg-rose-900 border border-rose-700 cursor-pointer shrink-0 font-bold"
+                              title="Mark Absent"
+                            >
+                              Mark Absent
+                            </button>
+                          </div>
+                        );
+                      })}
                       {autoMatchResult.presentMembers.length === 0 && (
                         <div className="text-[10px] text-emerald-400/60 italic p-2">No members matched as present.</div>
                       )}
@@ -3002,17 +2745,14 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
                     </div>
                     <div className="max-h-48 overflow-y-auto space-y-2 text-[11px] text-purple-300 pr-1">
                       {autoMatchResult.discardedEntries.map((entry, idx) => {
-                        const cleanEntry = cleanLineName(entry);
+                        const cleanEntry = cleanPastedLine(entry).cleanText;
                         const entryTokens = cleanEntry.split(' ').filter((t: string) => t.length >= 2);
 
-                        // Find smart suggestion candidate among absent members respecting single vs double name rule
+                        // Find smart suggestion candidate among absent members
                         const candidate = autoMatchResult.absentMembers.find(abs => {
-                          const absClean = cleanLineName(abs.fullName);
-                          const absTokens = absClean.split(' ').filter((t: string) => t.length >= 1);
-                          // Single-name entries must not suggest multi-name members, and vice-versa
-                          if (entryTokens.length === 1 && absTokens.length !== 1) return false;
-                          if (entryTokens.length >= 2 && absTokens.length < 2) return false;
-                          return entryTokens.some((et: string) => absTokens.some((at: string) => at === et || getSimilarity(at, et) >= 0.82));
+                          const absClean = cleanPastedLine(abs.fullName).cleanText;
+                          const absTokens = absClean.split(' ').filter((t: string) => t.length >= 2);
+                          return entryTokens.some((et: string) => absTokens.some((at: string) => at === et || getSimilarity(at, et) >= 0.80));
                         });
 
                         return (
