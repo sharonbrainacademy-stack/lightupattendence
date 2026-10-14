@@ -1,9 +1,12 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Calendar, UserCheck, UserX, Clock, CheckCircle2, Search, Filter, Sparkles, MessageSquare, History, Plus, Save, Trash2, ArrowRight, ShieldCheck, Download, Upload, FileText, X, AlertCircle, HelpCircle, Check, Zap, ArrowRightLeft } from 'lucide-react';
+import { Calendar, UserCheck, UserX, Clock, CheckCircle2, Search, Filter, Sparkles, MessageSquare, History, Plus, Save, Trash2, ArrowRight, ShieldCheck, Download, Upload, FileText, X, AlertCircle, HelpCircle, Check, Zap, ArrowRightLeft, BookOpen, Tag } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { Beneficiary, AttendanceSession, AttendanceRecordItem, AttendanceStatus, UserRole, MinistryGroup } from '../types';
 import { findDuplicateAttendanceSessions } from '../utils/duplicateDetector';
 import { processAttendanceText, AttendanceAutoMatchResult, cleanPastedLine, getSimilarity } from '../utils/attendanceMatcher';
+import { AttendanceRulesModal } from './AttendanceRulesModal';
+import { NameMatchingRulesModal } from './NameMatchingRulesModal';
+import { getNameMatchingSettings } from '../utils/nameMatchingRules';
 
 interface AttendanceTrackerProps {
   beneficiaries: Beneficiary[];
@@ -187,19 +190,23 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
   const [autoMatchResult, setAutoMatchResult] = useState<AttendanceAutoMatchResult | null>(null);
   const [isQuickPasteOpen, setIsQuickPasteOpen] = useState(false);
   const [quickPasteText, setQuickPasteText] = useState('');
+  const [isRulesModalOpen, setIsRulesModalOpen] = useState(false);
+  const [isNameMatchingRulesOpen, setIsNameMatchingRulesOpen] = useState(false);
 
   const handleProcessUploadText = (textToProcess: string) => {
     if (!textToProcess.trim()) {
       setAutoMatchResult(null);
       return;
     }
-    const result = processAttendanceText(textToProcess, beneficiaries);
+    const settings = getNameMatchingSettings();
+    const result = processAttendanceText(textToProcess, beneficiaries, settings.confidenceThreshold);
     setAutoMatchResult(result);
   };
 
   const handleExecuteQuickPaste = () => {
     if (!quickPasteText.trim()) return;
-    const result = processAttendanceText(quickPasteText, beneficiaries);
+    const settings = getNameMatchingSettings();
+    const result = processAttendanceText(quickPasteText, beneficiaries, settings.confidenceThreshold);
     setAutoMatchResult(result);
 
     if (result.presentMembers.length > 0) {
@@ -1527,6 +1534,24 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
             </button>
 
             <button
+              onClick={() => setIsNameMatchingRulesOpen(true)}
+              className="px-3.5 py-2.5 rounded-2xl bg-gradient-to-r from-purple-800 to-indigo-900 hover:from-purple-700 hover:to-indigo-800 text-amber-300 border border-amber-500/50 text-xs font-black flex items-center gap-1.5 shadow-lg cursor-pointer transition-all"
+              title="Inspect official 8-tier name matching rules and test with live simulator"
+            >
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <span>🔍 Name Matching Rules</span>
+            </button>
+
+            <button
+              onClick={() => setIsRulesModalOpen(true)}
+              className="px-3.5 py-2.5 rounded-2xl bg-purple-900/80 hover:bg-purple-800 text-purple-200 border border-purple-700 text-xs font-bold flex items-center gap-1.5 shadow-lg cursor-pointer transition-all"
+              title="View, copy, and download official attendance time policies and templates"
+            >
+              <BookOpen className="w-4 h-4 text-purple-400" />
+              <span>⏰ Time Rules</span>
+            </button>
+
+            <button
               onClick={() => setIsExportModalOpen(true)}
               className="px-4 py-2.5 rounded-2xl bg-purple-900/80 hover:bg-purple-800 text-amber-300 border border-purple-700 text-xs font-extrabold flex items-center gap-2 shadow-lg cursor-pointer"
               title="Download clean, organized attendance registers as CSV"
@@ -2519,10 +2544,30 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
             </div>
 
             {/* Explanatory Info Card */}
-            <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs space-y-1">
-              <div className="font-extrabold flex items-center gap-1.5 text-amber-300">
-                <HelpCircle className="w-4 h-4 text-amber-400" />
-                <span>How This Auto-Processor Works:</span>
+            <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs space-y-2">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="font-extrabold flex items-center gap-1.5 text-amber-300">
+                  <HelpCircle className="w-4 h-4 text-amber-400" />
+                  <span>How This Auto-Processor Works:</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsNameMatchingRulesOpen(true)}
+                    className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500/30 to-amber-400/20 hover:bg-amber-500/40 text-amber-300 border border-amber-400/60 text-[11px] font-black flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>🔍 Name Matching Rules &amp; Simulator &rarr;</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsRulesModalOpen(true)}
+                    className="px-2.5 py-1 rounded-lg bg-purple-900/60 hover:bg-purple-800 text-purple-300 border border-purple-700 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-all"
+                  >
+                    <BookOpen className="w-3 h-3 text-purple-400" />
+                    <span>Time Policies</span>
+                  </button>
+                </div>
               </div>
               <ul className="list-disc list-inside space-y-0.5 text-[11px] text-amber-200/90">
                 <li>Paste any raw meeting text (e.g. WhatsApp list, Zoom chat transcript, plain text).</li>
@@ -2632,12 +2677,49 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
             {/* Match Results Breakdown */}
             {autoMatchResult && (
               <div className="p-4 rounded-2xl bg-purple-950/90 border border-purple-800 space-y-4 animate-fadeIn">
-                <h4 className="text-xs font-extrabold uppercase tracking-wider text-amber-300 font-cinzel flex items-center justify-between">
-                  <span>⚡ Auto-Matching Analysis Summary</span>
-                  <span className="text-[10px] text-purple-300 font-mono">
-                    Total Directory Members: {beneficiaries.length}
-                  </span>
-                </h4>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <h4 className="text-xs font-extrabold uppercase tracking-wider text-amber-300 font-cinzel flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-amber-400" />
+                    <span>Auto-Matching Analysis Summary</span>
+                  </h4>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsNameMatchingRulesOpen(true)}
+                      className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all"
+                    >
+                      <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                      <span>Inspect 8 Matching Rules</span>
+                    </button>
+                    <span className="text-[10px] text-purple-300 font-mono">
+                      Directory Total: {beneficiaries.length}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Organized Rule Classification Chips */}
+                {autoMatchResult.ruleBreakdown && Object.keys(autoMatchResult.ruleBreakdown).length > 0 && (
+                  <div className="p-2.5 rounded-xl bg-purple-900/60 border border-purple-700/80 space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-purple-200">
+                      <span className="flex items-center gap-1.5 text-amber-300">
+                        <Tag className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Organized Rule Results:</span>
+                      </span>
+                      <span className="text-[10px] text-purple-400 font-mono">
+                        {autoMatchResult.presentMembers.length} Matched Across {Object.keys(autoMatchResult.ruleBreakdown).length} Rule Types
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {Object.entries(autoMatchResult.ruleBreakdown).map(([ruleName, count]) => (
+                        <span key={ruleName} className="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-purple-950 text-amber-200 border border-purple-700 font-bold flex items-center gap-1 shadow-sm">
+                          <span className="text-emerald-400">✓</span>
+                          <span>{ruleName}:</span>
+                          <strong className="text-white bg-purple-900 px-1 rounded">{count}</strong>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Instant Action Banner when members are matched */}
                 {autoMatchResult.presentMembers.length > 0 && (
@@ -2671,12 +2753,17 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
                         const matchEntry = autoMatchResult.matchedEntries?.find(e => e.member.id === m.id);
                         return (
                           <div key={m.id} className="flex items-center justify-between gap-1 p-1.5 rounded-lg bg-emerald-900/40 border border-emerald-800/60">
-                            <div className="min-w-0 pr-1">
+                            <div className="min-w-0 pr-1 flex-1">
                               <span className="truncate block font-bold text-white">✓ {m.fullName}</span>
                               {matchEntry && (
-                                <span className="text-[9px] text-emerald-300/80 truncate block font-mono">
-                                  {matchEntry.reason}
-                                </span>
+                                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-950 text-amber-300 font-mono border border-purple-700 truncate max-w-[140px]">
+                                    {matchEntry.ruleName}
+                                  </span>
+                                  <span className="text-[9px] text-emerald-300 font-mono font-bold">
+                                    {matchEntry.score}%
+                                  </span>
+                                </div>
                               )}
                             </div>
                             <button
@@ -3072,6 +3159,21 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
           </div>
         </div>
       )}
+
+      {/* MODAL 5: Official Attendance Rules & Guidelines (Punctuality & Time Policies) */}
+      <AttendanceRulesModal
+        isOpen={isRulesModalOpen}
+        onClose={() => setIsRulesModalOpen(false)}
+        activeGroup={activeGroup}
+        onOpenNameMatchingRules={() => setIsNameMatchingRulesOpen(true)}
+      />
+
+      {/* MODAL 6: Official Name Matching Rules & Interactive Simulator */}
+      <NameMatchingRulesModal
+        isOpen={isNameMatchingRulesOpen}
+        onClose={() => setIsNameMatchingRulesOpen(false)}
+        beneficiaries={beneficiaries}
+      />
 
     </div>
   );

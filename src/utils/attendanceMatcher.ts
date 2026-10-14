@@ -160,6 +160,8 @@ export interface LineMatchResult {
   matched: Beneficiary | null;
   reason: string;
   score: number;
+  ruleId: string;
+  ruleName: string;
 }
 
 /**
@@ -167,44 +169,63 @@ export interface LineMatchResult {
  */
 export function matchLineToBeneficiary(
   rawLine: string,
-  index: BeneficiaryIndexItem[]
+  index: BeneficiaryIndexItem[],
+  minThreshold: number = 75
 ): LineMatchResult {
   const { cleanText, extractedPhone } = cleanPastedLine(rawLine);
 
-  // 1. Direct Phone Number Match (Highest confidence = 100)
+  // 1. Direct Phone Number Match (Highest confidence = 100) - Rule 1
   if (extractedPhone && extractedPhone.length >= 7) {
     const phoneShort = extractedPhone.slice(-7);
     for (const bObj of index) {
       if (bObj.phone === extractedPhone || (bObj.shortPhone && bObj.shortPhone === phoneShort)) {
-        return { matched: bObj.beneficiary, reason: `Phone match (${extractedPhone})`, score: 100 };
+        return {
+          matched: bObj.beneficiary,
+          reason: `Phone match (${extractedPhone})`,
+          score: 100,
+          ruleId: 'rule_phone',
+          ruleName: 'Rule 1: Phone Normalization & Exact Match'
+        };
       }
     }
   }
 
   // If no name text left (e.g. was just an unknown phone number or whitespace)
   if (!cleanText || cleanText.length < 2) {
-    return { matched: null, reason: 'Line too short or empty', score: 0 };
+    return {
+      matched: null,
+      reason: 'Line too short or empty',
+      score: 0,
+      ruleId: 'rule_none',
+      ruleName: 'Unmatched'
+    };
   }
 
   const lineTokens = cleanText.split(' ').filter(t => t.length >= 2);
   let bestB: Beneficiary | null = null;
   let bestScore = 0;
   let bestReason = '';
+  let bestRuleId = 'rule_none';
+  let bestRuleName = 'Unmatched';
 
   for (const bObj of index) {
     let score = 0;
     let reason = '';
+    let currentRuleId = 'rule_none';
+    let currentRuleName = 'Unmatched';
 
-    // A. Exact Name Match with any variant
+    // A. Exact Name Match with any variant - Rule 2
     for (const variant of bObj.nameVariants) {
       if (cleanText === variant) {
         score = 99;
         reason = `Exact name match "${variant}"`;
+        currentRuleId = 'rule_exact_name';
+        currentRuleName = 'Rule 2: Full Name & Alias Match';
         break;
       }
     }
 
-    // B. Token Subset / Set Matching (Word-order independent)
+    // B. Token Subset / Set Matching (Word-order independent) - Rules 3, 4, 5
     if (score < 90 && lineTokens.length >= 1) {
       for (const targetTokens of bObj.variantTokenSets) {
         if (targetTokens.length === 0) continue;
@@ -222,22 +243,28 @@ export function matchLineToBeneficiary(
           }
 
           if (matchCount === targetTokens.length && targetTokens.length >= 2) {
-            const currentScore = 95;
+            const currentScore = 96;
             if (currentScore > score) {
               score = currentScore;
               reason = `All words matched (${targetTokens.join(' ')})`;
+              currentRuleId = 'rule_word_order';
+              currentRuleName = 'Rule 3: Invariant Word-Order Match';
             }
           } else if (matchCount === lineTokens.length && lineTokens.length >= 2) {
             const currentScore = 94;
             if (currentScore > score) {
               score = currentScore;
               reason = `Matched line words in (${targetTokens.join(' ')})`;
+              currentRuleId = 'rule_subset_token';
+              currentRuleName = 'Rule 4: Multi-Token Subset Match';
             }
           } else if (matchCount >= 2) {
             const currentScore = 90;
             if (currentScore > score) {
               score = currentScore;
               reason = `Matched 2+ names in (${targetTokens.join(' ')})`;
+              currentRuleId = 'rule_subset_token';
+              currentRuleName = 'Rule 4: Multi-Token Subset Match';
             }
           }
         } else if (lineTokens.length === 1 && targetTokens.length === 1) {
@@ -247,25 +274,62 @@ export function matchLineToBeneficiary(
           if (lt === tt) {
             score = 92;
             reason = `Single name match "${tt}"`;
+            currentRuleId = 'rule_key_name';
+            currentRuleName = 'Rule 5: Distinctive Key Name Match';
           } else if (lt.length >= 4 && tt.length >= 4 && (lt.startsWith(tt) || tt.startsWith(lt))) {
             score = 88;
             reason = `Prefix match "${tt}"`;
+            currentRuleId = 'rule_key_name';
+            currentRuleName = 'Rule 5: Distinctive Key Name Match';
           } else if (getSimilarity(lt, tt) >= 0.85) {
             score = 82;
             reason = `Fuzzy match "${tt}"`;
+            currentRuleId = 'rule_fuzzy';
+            currentRuleName = 'Rule 8: Fuzzy Typo Tolerance Match';
           }
         } else if (lineTokens.length >= 2 && targetTokens.length === 1) {
           // e.g. Line has "Tessy Omoregie" vs DB has "Tessy"
           const tt = targetTokens[0];
           if (lineTokens.includes(tt)) {
-            score = 85;
+            score = 88;
             reason = `Contained name "${tt}"`;
+            currentRuleId = 'rule_subset_token';
+            currentRuleName = 'Rule 4: Multi-Token Subset Match';
+          }
+        } else if (lineTokens.length === 1 && targetTokens.length >= 2) {
+          // e.g. Line has "Ughede" or "Balogun" and DB has "Mrs Becky Ughede" or "Sister Balogun AGL"
+          const lt = lineTokens[0];
+          if (lt.length >= 3) {
+            const exactWordMatch = targetTokens.some(tt => tt === lt);
+            if (exactWordMatch) {
+              const currentScore = 91;
+              if (currentScore > score) {
+                score = currentScore;
+                reason = `Key name "${lt}" in (${targetTokens.join(' ')})`;
+                currentRuleId = 'rule_key_name';
+                currentRuleName = 'Rule 5: Distinctive Key Name Match';
+              }
+            } else {
+              const fuzzyWordMatch = targetTokens.some(tt => 
+                (tt.length >= 4 && (tt.startsWith(lt) || lt.startsWith(tt))) || 
+                getSimilarity(lt, tt) >= 0.85
+              );
+              if (fuzzyWordMatch) {
+                const currentScore = 82;
+                if (currentScore > score) {
+                  score = currentScore;
+                  reason = `Fuzzy key name "${lt}" in (${targetTokens.join(' ')})`;
+                  currentRuleId = 'rule_fuzzy';
+                  currentRuleName = 'Rule 8: Fuzzy Typo Tolerance Match';
+                }
+              }
+            }
           }
         }
       }
     }
 
-    // C. Whole String Fuzzy Similarity (handles single letter typos e.g. Imasuen/Imasuem)
+    // C. Whole String Fuzzy Similarity (handles single letter typos e.g. Imasuen/Imasuem) - Rule 8
     if (score < 80) {
       for (const variant of bObj.nameVariants) {
         const sim = getSimilarity(cleanText, variant);
@@ -274,6 +338,8 @@ export function matchLineToBeneficiary(
           if (currentScore > score) {
             score = currentScore;
             reason = `Fuzzy name similarity (${Math.round(sim * 100)}%) to "${variant}"`;
+            currentRuleId = 'rule_fuzzy';
+            currentRuleName = 'Rule 8: Fuzzy Typo Tolerance Match';
           }
         }
       }
@@ -283,23 +349,45 @@ export function matchLineToBeneficiary(
       bestScore = score;
       bestB = bObj.beneficiary;
       bestReason = reason;
+      bestRuleId = currentRuleId;
+      bestRuleName = currentRuleName;
     }
   }
 
-  // Threshold >= 75 confidence ensures high precision while not dropping valid members
-  if (bestScore >= 75 && bestB) {
-    return { matched: bestB, reason: bestReason, score: bestScore };
+  // Threshold check (default >= 75)
+  if (bestScore >= minThreshold && bestB) {
+    return {
+      matched: bestB,
+      reason: bestReason,
+      score: bestScore,
+      ruleId: bestRuleId,
+      ruleName: bestRuleName
+    };
   }
 
-  return { matched: null, reason: bestReason || 'No directory member match found', score: bestScore };
+  return {
+    matched: null,
+    reason: bestReason || 'No directory member match found',
+    score: bestScore,
+    ruleId: 'rule_none',
+    ruleName: 'Unmatched'
+  };
 }
 
 export interface AttendanceAutoMatchResult {
   presentMembers: Beneficiary[];
   absentMembers: Beneficiary[];
-  matchedEntries: Array<{ line: string; member: Beneficiary; reason: string; score: number }>;
+  matchedEntries: Array<{
+    line: string;
+    member: Beneficiary;
+    reason: string;
+    score: number;
+    ruleId: string;
+    ruleName: string;
+  }>;
   discardedEntries: string[];
   totalLinesProcessed: number;
+  ruleBreakdown: Record<string, number>;
 }
 
 /**
@@ -360,14 +448,23 @@ export function splitAttendanceLines(rawText: string): string[] {
  */
 export function processAttendanceText(
   rawText: string,
-  beneficiaries: Beneficiary[]
+  beneficiaries: Beneficiary[],
+  minThreshold: number = 75
 ): AttendanceAutoMatchResult {
   const lines = splitAttendanceLines(rawText);
   const index = buildBeneficiaryIndex(beneficiaries);
 
   const matchedMemberIds = new Set<string>();
-  const matchedEntries: Array<{ line: string; member: Beneficiary; reason: string; score: number }> = [];
+  const matchedEntries: Array<{
+    line: string;
+    member: Beneficiary;
+    reason: string;
+    score: number;
+    ruleId: string;
+    ruleName: string;
+  }> = [];
   const discardedEntries: string[] = [];
+  const ruleBreakdown: Record<string, number> = {};
 
   lines.forEach(line => {
     // Skip general headers
@@ -375,7 +472,7 @@ export function processAttendanceText(
       return;
     }
 
-    const res = matchLineToBeneficiary(line, index);
+    const res = matchLineToBeneficiary(line, index, minThreshold);
     if (res.matched) {
       if (!matchedMemberIds.has(res.matched.id)) {
         matchedMemberIds.add(res.matched.id);
@@ -383,8 +480,11 @@ export function processAttendanceText(
           line,
           member: res.matched,
           reason: res.reason,
-          score: res.score
+          score: res.score,
+          ruleId: res.ruleId,
+          ruleName: res.ruleName
         });
+        ruleBreakdown[res.ruleName] = (ruleBreakdown[res.ruleName] || 0) + 1;
       }
     } else {
       const cleanDisplay = line.replace(/^[•\-\*\+\~\✓\>#\d]+[\.\)\-\:\s]*/, '').trim();
@@ -402,6 +502,7 @@ export function processAttendanceText(
     absentMembers,
     matchedEntries,
     discardedEntries,
-    totalLinesProcessed: lines.length
+    totalLinesProcessed: lines.length,
+    ruleBreakdown
   };
 }
