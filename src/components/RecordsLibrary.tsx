@@ -19,7 +19,10 @@ import {
   ArrowUpDown,
   BookOpen,
   ArrowRightLeft,
-  X
+  X,
+  Edit3,
+  Save,
+  Check
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
@@ -34,6 +37,8 @@ interface RecordsLibraryProps {
   onDeleteSession: (sessionId: string) => void;
   onTakeNewAttendance: () => void;
   onSelectSession?: (session: AttendanceSession) => void;
+  onUpdateSession?: (session: AttendanceSession) => void;
+  onEditSessionInTracker?: (sessionId: string) => void;
   onSwitchGroupDirect?: (group: MinistryGroup) => void;
 }
 
@@ -46,6 +51,8 @@ export const RecordsLibrary: React.FC<RecordsLibraryProps> = ({
   onDeleteSession,
   onTakeNewAttendance,
   onSelectSession,
+  onUpdateSession,
+  onEditSessionInTracker,
   onSwitchGroupDirect,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -56,6 +63,47 @@ export const RecordsLibrary: React.FC<RecordsLibraryProps> = ({
   const [modalSearchTerm, setModalSearchTerm] = useState('');
   const [modalStatusFilter, setModalStatusFilter] = useState<'ALL' | 'Present' | 'Late' | 'Absent' | 'Excused'>('ALL');
   const [sessionToDelete, setSessionToDelete] = useState<AttendanceSession | null>(null);
+
+  // Edit Date & Session Details State
+  const [editingDateSession, setEditingDateSession] = useState<AttendanceSession | null>(null);
+  const [editDateValue, setEditDateValue] = useState<string>('');
+  const [editTitleValue, setEditTitleValue] = useState<string>('');
+  const [editTypeValue, setEditTypeValue] = useState<AttendanceSession['serviceType']>('Daily Morning Devotional');
+  const [editNotesValue, setEditNotesValue] = useState<string>('');
+  const [editSuccessNotice, setEditSuccessNotice] = useState<string | null>(null);
+
+  const handleOpenEditDate = (session: AttendanceSession) => {
+    setEditingDateSession(session);
+    setEditDateValue(session.serviceDate);
+    setEditTitleValue(session.serviceName);
+    setEditTypeValue(session.serviceType);
+    setEditNotesValue(session.notes || '');
+  };
+
+  const handleSaveEditedDate = () => {
+    if (!editingDateSession || !editDateValue) return;
+
+    const updatedSession: AttendanceSession = {
+      ...editingDateSession,
+      serviceDate: editDateValue,
+      serviceName: editTitleValue.trim() || editingDateSession.serviceName,
+      serviceType: editTypeValue || editingDateSession.serviceType,
+      notes: editNotesValue,
+      updatedAt: new Date().toISOString()
+    };
+
+    if (onUpdateSession) {
+      onUpdateSession(updatedSession);
+    }
+
+    if (viewingSession && viewingSession.id === editingDateSession.id) {
+      setViewingSession(updatedSession);
+    }
+
+    setEditSuccessNotice(`✅ Attendance record date successfully changed to ${editDateValue}!`);
+    setTimeout(() => setEditSuccessNotice(null), 4500);
+    setEditingDateSession(null);
+  };
 
   // Sync group filter when activeGroup prop changes
   React.useEffect(() => {
@@ -514,6 +562,14 @@ export const RecordsLibrary: React.FC<RecordsLibraryProps> = ({
         </div>
       </div>
 
+      {/* Success Notification Banner */}
+      {editSuccessNotice && (
+        <div className="p-3.5 rounded-2xl bg-emerald-950/90 border-2 border-emerald-500 text-emerald-200 text-xs font-bold flex items-center gap-2.5 animate-fadeIn shadow-lg">
+          <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+          <span>{editSuccessNotice}</span>
+        </div>
+      )}
+
       {/* Filter and Search Bar */}
       <div className="p-4 rounded-2xl bg-purple-950/60 border border-purple-800/70 space-y-3">
         <div className="flex flex-col md:flex-row items-center gap-3">
@@ -680,6 +736,26 @@ export const RecordsLibrary: React.FC<RecordsLibraryProps> = ({
                     </button>
 
                     <button
+                      onClick={() => handleOpenEditDate(session)}
+                      className="px-2.5 py-2 rounded-xl bg-purple-900/80 hover:bg-purple-800 text-amber-300 border border-amber-500/50 text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
+                      title="Edit the date, title, or service type of this attendance record"
+                    >
+                      <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Edit Date</span>
+                    </button>
+
+                    {onEditSessionInTracker && (
+                      <button
+                        onClick={() => onEditSessionInTracker(session.id)}
+                        className="px-2.5 py-2 rounded-xl bg-purple-900/60 hover:bg-purple-800 text-indigo-300 border border-purple-700/80 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all"
+                        title="Open and edit roll call in Attendance Sheet"
+                      >
+                        <Edit3 className="w-3.5 h-3.5 text-indigo-400" />
+                        <span className="hidden sm:inline">Edit Roll Call</span>
+                      </button>
+                    )}
+
+                    <button
                       onClick={() => handleExportSessionToCSV(session)}
                       className="p-2 rounded-xl bg-purple-900/60 hover:bg-purple-800 text-pink-300 border border-purple-700/80 cursor-pointer"
                       title="Export to CSV (.csv)"
@@ -789,10 +865,21 @@ export const RecordsLibrary: React.FC<RecordsLibraryProps> = ({
             {/* Modal Header */}
             <div className="flex items-center justify-between pb-4 border-b border-purple-800/80">
               <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs px-2.5 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold">
-                    📅 {viewingSession.serviceDate}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-mono text-xs px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                    <span>{viewingSession.serviceDate}</span>
                   </span>
+                  
+                  <button
+                    onClick={() => handleOpenEditDate(viewingSession)}
+                    className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/50 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-all shadow-sm"
+                    title="Click to edit the date of this attendance record"
+                  >
+                    <Edit3 className="w-3 h-3 text-amber-300" />
+                    <span>Edit Date</span>
+                  </button>
+
                   <span className={`text-xs font-bold px-2 py-0.5 rounded-lg border ${
                     getSessionGroup(viewingSession) === 'Peace Group'
                       ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
@@ -809,7 +896,22 @@ export const RecordsLibrary: React.FC<RecordsLibraryProps> = ({
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                {onEditSessionInTracker && (
+                  <button
+                    onClick={() => {
+                      const sId = viewingSession.id;
+                      setViewingSession(null);
+                      onEditSessionInTracker(sId);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white border border-purple-400 text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    title="Edit roll call marks directly in Attendance Tracker"
+                  >
+                    <Edit3 className="w-3.5 h-3.5 text-amber-300" />
+                    <span className="hidden sm:inline">Edit Roll Call</span>
+                  </button>
+                )}
+
                 <button
                   onClick={() => handleExportSessionToCSV(viewingSession)}
                   className="px-3 py-1.5 rounded-xl bg-purple-900/60 hover:bg-purple-800 text-pink-300 border border-purple-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
@@ -1004,6 +1106,202 @@ export const RecordsLibrary: React.FC<RecordsLibraryProps> = ({
                 Delete Permanently
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit Attendance Record Date & Details */}
+      {editingDateSession && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fadeIn">
+          <div className="relative w-full max-w-lg rounded-3xl bg-gradient-to-b from-purple-950 via-slate-900 to-slate-950 border-2 border-amber-500/60 p-6 shadow-2xl space-y-5 text-white">
+            
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-purple-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-2xl bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                  <Calendar className="w-5 h-5 text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black font-cinzel text-amber-200">
+                    Edit Attendance Record Date
+                  </h3>
+                  <p className="text-[11px] text-purple-300">
+                    Modify the recorded meeting date or service details
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setEditingDateSession(null)}
+                className="p-1.5 rounded-xl bg-purple-900/60 hover:bg-rose-900/80 text-purple-200 hover:text-white cursor-pointer transition-all"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Current Session Summary */}
+            <div className="p-3.5 rounded-2xl bg-purple-900/40 border border-purple-800/80 space-y-1.5">
+              <div className="text-[10px] uppercase font-bold text-purple-300">Target Session Record</div>
+              <div className="text-xs font-bold text-amber-300 font-mono">
+                {editingDateSession.serviceName}
+              </div>
+              <div className="flex items-center gap-2 text-[11px] text-purple-200 font-mono pt-0.5">
+                <span>Current Date: <strong className="text-rose-300">{editingDateSession.serviceDate}</strong></span>
+                <span>•</span>
+                <span>{editingDateSession.records?.filter(r => r.status === 'Present' || r.status === 'Late').length || 0} Present</span>
+                <span>/</span>
+                <span>{editingDateSession.records?.length || 0} Total</span>
+              </div>
+            </div>
+
+            {/* Form Fields */}
+            <div className="space-y-3.5">
+              
+              {/* Date Input */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-amber-300">
+                  New Attendance Date: <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  type="date"
+                  value={editDateValue}
+                  onChange={(e) => setEditDateValue(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-purple-900/70 border border-amber-500/60 text-white text-xs font-bold font-mono focus:outline-none focus:border-amber-400 shadow-inner"
+                />
+
+                {/* Quick Date Presets */}
+                <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                  <span className="text-[10px] text-purple-300">Quick set:</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const today = new Date().toISOString().split('T')[0];
+                      setEditDateValue(today);
+                    }}
+                    className="px-2 py-0.5 rounded-lg bg-purple-900 hover:bg-purple-800 text-[10px] text-amber-300 border border-purple-700 font-mono cursor-pointer"
+                  >
+                    Today
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+                      setEditDateValue(yesterday);
+                    }}
+                    className="px-2 py-0.5 rounded-lg bg-purple-900 hover:bg-purple-800 text-[10px] text-amber-300 border border-purple-700 font-mono cursor-pointer"
+                  >
+                    Yesterday
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = new Date();
+                      d.setDate(d.getDate() - (d.getDay() || 7));
+                      setEditDateValue(d.toISOString().split('T')[0]);
+                    }}
+                    className="px-2 py-0.5 rounded-lg bg-purple-900 hover:bg-purple-800 text-[10px] text-amber-300 border border-purple-700 font-mono cursor-pointer"
+                  >
+                    Last Sunday
+                  </button>
+                </div>
+              </div>
+
+              {/* Service / Program Title */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-amber-300">
+                  Service / Meeting Title:
+                </label>
+                <input
+                  type="text"
+                  value={editTitleValue}
+                  onChange={(e) => setEditTitleValue(e.target.value)}
+                  placeholder="e.g. Daily Morning Devotional Prayers"
+                  className="w-full px-3.5 py-2 rounded-xl bg-purple-900/60 border border-purple-700 text-white text-xs font-bold focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              {/* Service Type */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-amber-300">
+                  Service Type:
+                </label>
+                <select
+                  value={editTypeValue}
+                  onChange={(e) => setEditTypeValue(e.target.value as any)}
+                  className="w-full px-3.5 py-2 rounded-xl bg-purple-900/60 border border-purple-700 text-white text-xs font-bold focus:outline-none focus:border-amber-400"
+                >
+                  <option value="Daily Morning Devotional">🌅 Daily Morning Devotional Prayers</option>
+                  <option value="Sunday Service">⛪ Sunday Service</option>
+                  <option value="Mid-Week Service">🔥 Mid-Week Service</option>
+                  <option value="Night Vigil">🌙 Night Vigil</option>
+                  <option value="Special Revival">⚡ Special Revival</option>
+                  <option value="Youth Fellowship">🙌 Youth Fellowship</option>
+                  <option value="Ministers Meeting">👑 Ministers Meeting</option>
+                  <option value="Other">📌 Other Outreach</option>
+                </select>
+              </div>
+
+              {/* Notes */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-amber-300">
+                  Meeting Notes / Remarks (Optional):
+                </label>
+                <textarea
+                  rows={2}
+                  value={editNotesValue}
+                  onChange={(e) => setEditNotesValue(e.target.value)}
+                  placeholder="Add any notes about this service..."
+                  className="w-full px-3.5 py-2 rounded-xl bg-purple-900/60 border border-purple-700 text-white text-xs focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+            </div>
+
+            {/* Explanatory Notice */}
+            <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-700/80 text-[11px] text-emerald-200 flex items-start gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              <span>
+                All <strong>{editingDateSession.records?.length || 0} member attendance statuses</strong> will be safely preserved and migrated to the new date (<strong>{editDateValue}</strong>).
+              </span>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-between pt-2 border-t border-purple-800">
+              {onEditSessionInTracker ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const sId = editingDateSession.id;
+                    setEditingDateSession(null);
+                    onEditSessionInTracker(sId);
+                  }}
+                  className="text-xs text-indigo-300 hover:text-indigo-200 underline font-semibold cursor-pointer"
+                >
+                  Edit individual member marks &rarr;
+                </button>
+              ) : <div />}
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingDateSession(null)}
+                  className="px-4 py-2 rounded-xl bg-purple-900/60 hover:bg-purple-800 text-purple-200 font-bold text-xs cursor-pointer"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSaveEditedDate}
+                  disabled={!editDateValue}
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-purple-950 font-black text-xs flex items-center gap-1.5 shadow-lg shadow-amber-500/20 cursor-pointer disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>Save New Date</span>
+                </button>
+              </div>
+            </div>
+
           </div>
         </div>
       )}

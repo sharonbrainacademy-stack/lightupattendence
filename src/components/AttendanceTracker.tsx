@@ -20,6 +20,8 @@ interface AttendanceTrackerProps {
   onDeleteSession: (id: string) => void;
   onUpdateBeneficiary?: (b: Beneficiary) => void;
   onNavigateToBulkMsg: (targetCategory: string, preSelectedPhones?: string[], preSelectedNames?: string[]) => void;
+  initialSelectedSessionId?: string | null;
+  onClearInitialSelectedSessionId?: () => void;
 }
 
 export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
@@ -34,6 +36,8 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
   onDeleteSession,
   onUpdateBeneficiary,
   onNavigateToBulkMsg,
+  initialSelectedSessionId,
+  onClearInitialSelectedSessionId,
 }) => {
   const todayStr = new Date().toISOString().split('T')[0];
 
@@ -192,6 +196,71 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
   const [quickPasteText, setQuickPasteText] = useState('');
   const [isRulesModalOpen, setIsRulesModalOpen] = useState(false);
   const [isNameMatchingRulesOpen, setIsNameMatchingRulesOpen] = useState(false);
+
+  // Dedicated Edit Attendance Record Date & Info State
+  const [editingDateSession, setEditingDateSession] = useState<AttendanceSession | null>(null);
+  const [editDateValue, setEditDateValue] = useState<string>('');
+  const [editTitleValue, setEditTitleValue] = useState<string>('');
+  const [editTypeValue, setEditTypeValue] = useState<AttendanceSession['serviceType']>('Daily Morning Devotional');
+  const [editNotesValue, setEditNotesValue] = useState<string>('');
+
+  const handleOpenEditDate = (session: AttendanceSession) => {
+    setEditingDateSession(session);
+    setEditDateValue(session.serviceDate);
+    setEditTitleValue(session.serviceName);
+    setEditTypeValue(session.serviceType);
+    setEditNotesValue(session.notes || '');
+  };
+
+  const handleSaveEditedDate = () => {
+    if (!editingDateSession || !editDateValue) return;
+
+    const updatedSession: AttendanceSession = {
+      ...editingDateSession,
+      serviceDate: editDateValue,
+      serviceName: editTitleValue.trim() || editingDateSession.serviceName,
+      serviceType: editTypeValue || editingDateSession.serviceType,
+      notes: editNotesValue,
+      updatedAt: new Date().toISOString()
+    };
+
+    onSaveSession(updatedSession);
+
+    // If currently selected session in active roll call is this session, sync local state
+    if (selectedSessionId === editingDateSession.id) {
+      setServiceDate(editDateValue);
+      setServiceName(editTitleValue.trim() || editingDateSession.serviceName);
+      setServiceType(editTypeValue || editingDateSession.serviceType);
+      setNotes(editNotesValue);
+    }
+
+    setSaveNotification(`✅ Attendance record date successfully updated to ${editDateValue}!`);
+    setTimeout(() => setSaveNotification(null), 4000);
+    setEditingDateSession(null);
+  };
+
+  // Quick save date change when editing active session in Roll Call view
+  const handleQuickSaveDateChange = () => {
+    if (selectedSessionId === 'NEW') return;
+    const currentSess = (attendanceSessions || []).find(s => s.id === selectedSessionId);
+    const records = Object.values(recordsMap);
+
+    const updatedSession: AttendanceSession = {
+      id: selectedSessionId,
+      serviceName,
+      serviceType,
+      serviceDate,
+      recordedBy: currentUserName,
+      notes,
+      records: records.length > 0 ? records : (currentSess?.records || []),
+      createdAt: currentSess?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    onSaveSession(updatedSession);
+    setSaveNotification(`✅ Attendance record date successfully updated and saved to ${serviceDate}!`);
+    setTimeout(() => setSaveNotification(null), 4000);
+  };
 
   const handleProcessUploadText = (textToProcess: string) => {
     if (!textToProcess.trim()) {
@@ -1168,6 +1237,16 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
     }
   };
 
+  // Automatically select target session when requested externally (e.g. from Records Library edit date)
+  useEffect(() => {
+    if (initialSelectedSessionId) {
+      handleSelectSession(initialSelectedSessionId);
+      if (onClearInitialSelectedSessionId) {
+        onClearInitialSelectedSessionId();
+      }
+    }
+  }, [initialSelectedSessionId]);
+
   // Helper to automatically persist attendance changes immediately to storage
   const autoSaveSession = (
     newRecordsMap: Record<string, AttendanceRecordItem>,
@@ -1788,6 +1867,15 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
                           </button>
 
                           <button
+                            onClick={() => handleOpenEditDate(session)}
+                            className="px-3 py-2 rounded-xl bg-purple-900/90 hover:bg-purple-800 text-amber-300 border border-amber-500/50 text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
+                            title="Edit the date, title, or service details of this attendance record"
+                          >
+                            <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                            <span>Edit Date</span>
+                          </button>
+
+                          <button
                             onClick={() => {
                               handleSelectSession(session.id);
                               handleExportActiveSessionCSV();
@@ -1932,17 +2020,110 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
 
       {/* Service Details Form Controls */}
       <div className="p-5 rounded-2xl bg-purple-950/80 border border-purple-800/80 space-y-4">
+        
+        {/* Visual Badge when editing an existing attendance record */}
+        {selectedSessionId !== 'NEW' ? (
+          <div className="p-3.5 rounded-2xl bg-gradient-to-r from-indigo-950 via-purple-950 to-indigo-950 border border-amber-500/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-indigo-200 shadow-md">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                <Calendar className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="font-extrabold text-amber-300 block">
+                  Editing Saved Attendance Record:
+                </span>
+                <span className="text-[11px] text-purple-200">
+                  You are permitted to freely change the <strong>Service Date</strong>, Title, or individual member marks. Click <strong>"Save Date"</strong> or <strong>"Save Roll Call Record"</strong> below when finished.
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  const currentSess = (attendanceSessions || []).find(s => s.id === selectedSessionId);
+                  if (currentSess) {
+                    handleOpenEditDate(currentSess);
+                  }
+                }}
+                className="px-3 py-1.5 rounded-xl bg-purple-900/90 hover:bg-purple-800 text-amber-300 border border-amber-500/60 text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
+                title="Edit date, title, or service details in popup"
+              >
+                <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                <span>Edit Date &amp; Details</span>
+              </button>
+              <span className="text-[11px] font-mono font-bold px-2.5 py-1.5 rounded-xl bg-purple-900 border border-amber-400/60 text-amber-300 shrink-0 shadow-sm">
+                Current Date: {serviceDate}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="text-[11px] text-purple-300 flex items-center justify-between">
+            <span className="flex items-center gap-1.5 text-amber-300 font-bold">
+              <Calendar className="w-3.5 h-3.5 text-amber-400" />
+              <span>Marking New Attendance Record</span>
+            </span>
+            <span className="text-purple-400 font-mono">
+              You can set any past or present date below
+            </span>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
-            <label className="block text-[10px] font-extrabold text-amber-300 uppercase tracking-wider mb-1">
-              Service Date
-            </label>
-            <input
-              type="date"
-              value={serviceDate}
-              onChange={(e) => setServiceDate(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl bg-purple-900/60 border border-purple-700 text-white text-xs font-bold focus:outline-none focus:border-amber-400"
-            />
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-[10px] font-extrabold text-amber-300 uppercase tracking-wider">
+                Service Date (Editable)
+              </label>
+              <div className="flex items-center gap-1 text-[10px] font-mono">
+                <button
+                  type="button"
+                  onClick={() => setServiceDate(todayStr)}
+                  className="px-1.5 py-0.2 rounded bg-purple-900 hover:bg-purple-800 text-amber-300 border border-purple-700 cursor-pointer"
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+                    setServiceDate(yesterday);
+                  }}
+                  className="px-1.5 py-0.2 rounded bg-purple-900 hover:bg-purple-800 text-amber-300 border border-purple-700 cursor-pointer"
+                >
+                  Yesterday
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const twoDays = new Date(Date.now() - 2 * 86400000).toISOString().split('T')[0];
+                    setServiceDate(twoDays);
+                  }}
+                  className="px-1.5 py-0.2 rounded bg-purple-900 hover:bg-purple-800 text-amber-300 border border-purple-700 cursor-pointer hidden sm:inline-block"
+                >
+                  -2d
+                </button>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={serviceDate}
+                onChange={(e) => setServiceDate(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl bg-purple-900/60 border border-amber-500/60 text-white text-xs font-bold font-mono focus:outline-none focus:border-amber-400 shadow-inner"
+              />
+              {selectedSessionId !== 'NEW' && (
+                <button
+                  type="button"
+                  onClick={handleQuickSaveDateChange}
+                  className="px-3 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 text-purple-950 font-black text-xs whitespace-nowrap flex items-center gap-1 shadow-md cursor-pointer shrink-0"
+                  title="Immediately save this attendance record under the new date"
+                >
+                  <Save className="w-3.5 h-3.5 text-purple-950" />
+                  <span>Save Date</span>
+                </button>
+              )}
+            </div>
           </div>
 
           <div>
@@ -2618,6 +2799,49 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
                 </label>
               </div>
 
+              {/* Target Attendance Date for Auto-Mark */}
+              <div className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-purple-900/40 border border-purple-700/80 flex-wrap">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    <Calendar className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-extrabold text-amber-300 block">
+                      Target Attendance Date:
+                    </span>
+                    <span className="text-[10px] text-purple-300">
+                      Uploading for a past meeting? Set the date here before auto-matching.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setServiceDate(todayStr)}
+                    className="px-2 py-1 rounded-lg bg-purple-950 hover:bg-purple-900 text-amber-300 border border-purple-700 text-[10px] font-mono cursor-pointer"
+                  >
+                    Today
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+                      setServiceDate(yesterday);
+                    }}
+                    className="px-2 py-1 rounded-lg bg-purple-950 hover:bg-purple-900 text-amber-300 border border-purple-700 text-[10px] font-mono cursor-pointer"
+                  >
+                    Yesterday
+                  </button>
+                  <input
+                    type="date"
+                    value={serviceDate}
+                    onChange={(e) => setServiceDate(e.target.value)}
+                    className="px-3 py-1.5 rounded-xl bg-purple-950 border border-amber-500/60 text-amber-200 text-xs font-bold font-mono focus:outline-none focus:border-amber-400 cursor-pointer shadow-sm"
+                  />
+                </div>
+              </div>
+
               {autoMarkPasteMode === 'dual' ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {/* WhatsApp Attendance Box */}
@@ -3174,6 +3398,179 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
         onClose={() => setIsNameMatchingRulesOpen(false)}
         beneficiaries={beneficiaries}
       />
+
+      {/* MODAL 7: Edit Attendance Record Date & Service Details */}
+      {editingDateSession && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fadeIn">
+          <div className="relative w-full max-w-lg rounded-3xl bg-gradient-to-b from-purple-950 via-slate-900 to-slate-950 border-2 border-amber-500/60 p-6 shadow-2xl space-y-5 text-white">
+            
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-purple-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-2xl bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                  <Calendar className="w-5 h-5 text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black font-cinzel text-amber-200">
+                    Edit Attendance Record Date
+                  </h3>
+                  <p className="text-[11px] text-purple-300">
+                    Modify the recorded service date or meeting details
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setEditingDateSession(null)}
+                className="p-2 rounded-xl text-purple-400 hover:text-white hover:bg-purple-900/60 transition-all cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body Form */}
+            <div className="space-y-4">
+              
+              {/* Date Input with quick presets */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-extrabold text-amber-300 uppercase tracking-wider">
+                    Service / Meeting Date *
+                  </label>
+                  <div className="flex items-center gap-1.5 text-[10px] font-mono">
+                    <button
+                      type="button"
+                      onClick={() => setEditDateValue(todayStr)}
+                      className="px-2 py-0.5 rounded bg-purple-900 hover:bg-purple-800 text-amber-300 border border-purple-700 cursor-pointer"
+                    >
+                      Today
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const yest = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+                        setEditDateValue(yest);
+                      }}
+                      className="px-2 py-0.5 rounded bg-purple-900 hover:bg-purple-800 text-amber-300 border border-purple-700 cursor-pointer"
+                    >
+                      Yesterday
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const twoDays = new Date(Date.now() - 2 * 86400000).toISOString().split('T')[0];
+                        setEditDateValue(twoDays);
+                      }}
+                      className="px-2 py-0.5 rounded bg-purple-900 hover:bg-purple-800 text-amber-300 border border-purple-700 cursor-pointer"
+                    >
+                      -2 Days
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+                        setEditDateValue(weekAgo);
+                      }}
+                      className="px-2 py-0.5 rounded bg-purple-900 hover:bg-purple-800 text-amber-300 border border-purple-700 cursor-pointer"
+                    >
+                      -1 Week
+                    </button>
+                  </div>
+                </div>
+
+                <input
+                  type="date"
+                  value={editDateValue}
+                  onChange={(e) => setEditDateValue(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl bg-purple-900/60 border border-amber-500/60 text-white font-mono font-bold text-sm focus:outline-none focus:border-amber-400 shadow-inner"
+                  required
+                />
+              </div>
+
+              {/* Service Title */}
+              <div>
+                <label className="block text-xs font-extrabold text-amber-300 uppercase tracking-wider mb-1.5">
+                  Service / Program Title
+                </label>
+                <input
+                  type="text"
+                  value={editTitleValue}
+                  onChange={(e) => setEditTitleValue(e.target.value)}
+                  placeholder="e.g. Daily Morning Devotional Prayers"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-purple-900/60 border border-purple-700 text-white text-xs font-medium focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              {/* Service Type */}
+              <div>
+                <label className="block text-xs font-extrabold text-amber-300 uppercase tracking-wider mb-1.5">
+                  Service Type
+                </label>
+                <select
+                  value={editTypeValue}
+                  onChange={(e) => setEditTypeValue(e.target.value as any)}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-purple-900/60 border border-purple-700 text-white text-xs font-medium focus:outline-none focus:border-amber-400"
+                >
+                  <option value="Daily Morning Devotional">🌅 Daily Morning Devotional Prayers</option>
+                  <option value="Sunday Service">⛪ Sunday Service</option>
+                  <option value="Mid-Week Service">🔥 Mid-Week Service</option>
+                  <option value="Night Vigil">🌙 Night Vigil</option>
+                  <option value="Special Revival">⚡ Special Revival</option>
+                  <option value="Youth Fellowship">🙌 Youth Fellowship</option>
+                  <option value="Ministers Meeting">👑 Ministers Meeting</option>
+                  <option value="Other">📌 Other Outreach</option>
+                </select>
+              </div>
+
+              {/* Optional Notes */}
+              <div>
+                <label className="block text-xs font-extrabold text-amber-300 uppercase tracking-wider mb-1.5">
+                  Service Notes / Remarks (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={editNotesValue}
+                  onChange={(e) => setEditNotesValue(e.target.value)}
+                  placeholder="Add any notes about this meeting date..."
+                  className="w-full px-3.5 py-2 rounded-xl bg-purple-900/60 border border-purple-700 text-white text-xs focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+            </div>
+
+            {/* Explanatory Notice */}
+            <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-700/80 text-[11px] text-emerald-200 flex items-start gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              <span>
+                All <strong>{editingDateSession.records?.length || 0} member roll call entries</strong> ({editingDateSession.records?.filter(r => r.status === 'Present' || r.status === 'Late').length || 0} Present/Late) will be safely preserved and moved to <strong>{editDateValue || 'the new date'}</strong>.
+              </span>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-purple-800">
+              <button
+                type="button"
+                onClick={() => setEditingDateSession(null)}
+                className="px-4 py-2.5 rounded-xl bg-purple-900/60 hover:bg-purple-800 text-purple-200 font-bold text-xs cursor-pointer"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSaveEditedDate}
+                disabled={!editDateValue}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-purple-950 font-black text-xs flex items-center gap-1.5 shadow-lg shadow-amber-500/20 cursor-pointer disabled:opacity-50"
+              >
+                <Save className="w-4 h-4" />
+                <span>Save New Date</span>
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
 
     </div>
   );

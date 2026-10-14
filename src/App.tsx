@@ -102,6 +102,12 @@ export default function App() {
 
   // Modal states
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+  const [targetSessionIdForTracker, setTargetSessionIdForTracker] = useState<string | null>(null);
+
+  const handleEditSessionInTracker = (sessionId: string) => {
+    setTargetSessionIdForTracker(sessionId);
+    setActiveTab('attendance');
+  };
 
   const isAuthenticated = authenticatedGroup !== null;
 
@@ -271,6 +277,8 @@ export default function App() {
               onDeleteSession={handleDeleteAttendanceSession}
               onUpdateBeneficiary={handleUpdateBeneficiary}
               onNavigateToBulkMsg={handleNavigateToBulkMsg}
+              initialSelectedSessionId={targetSessionIdForTracker}
+              onClearInitialSelectedSessionId={() => setTargetSessionIdForTracker(null)}
             />
           </ErrorBoundary>
         </div>
@@ -284,6 +292,8 @@ export default function App() {
             activeGroup={activeGroup}
             onDeleteSession={handleDeleteAttendanceSession}
             onTakeNewAttendance={() => setActiveTab('attendance')}
+            onUpdateSession={handleSaveAttendanceSession}
+            onEditSessionInTracker={handleEditSessionInTracker}
             onSwitchGroupDirect={handleGroupSwitched}
           />
         </div>
