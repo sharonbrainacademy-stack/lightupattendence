@@ -239,6 +239,7 @@ export const INITIAL_REGISTERED_BENEFICIARIES: Beneficiary[] = [
   { id: 'ebm-105', fullName: 'Member 0901 480 7223', phoneNumber: '+234 901 480 7223', network: 'Airtel', category: 'Esther Group Benin', defaultAmount: 1000, notes: 'Esther Group Benin Member', totalReceivedAmount: 0, totalTransfersCount: 0, createdAt: '2026-09-01T06:00:00.000Z' },
   { id: 'ebm-106', fullName: 'Member 0906 068 3971', phoneNumber: '+234 906 068 3971', network: 'MTN', category: 'Esther Group Benin', defaultAmount: 1000, notes: 'Esther Group Benin Member', totalReceivedAmount: 0, totalTransfersCount: 0, createdAt: '2026-09-01T06:00:00.000Z' },
   { id: 'ebm-107', fullName: 'Member 0913 696 5250', phoneNumber: '+234 913 696 5250', network: 'MTN', category: 'Esther Group Benin', defaultAmount: 1000, notes: 'Esther Group Benin Member', totalReceivedAmount: 0, totalTransfersCount: 0, createdAt: '2026-09-01T06:00:00.000Z' },
-  { id: 'ebm-108', fullName: 'Member 0916 627 5422', phoneNumber: '+234 916 627 5422', network: 'MTN', category: 'Esther Group Benin', defaultAmount: 1000, notes: 'Esther Group Benin Member', totalReceivedAmount: 0, totalTransfersCount: 0, createdAt: '2026-09-01T06:00:00.000Z' }
+  { id: 'ebm-108', fullName: 'Member 0916 627 5422', phoneNumber: '+234 916 627 5422', network: 'MTN', category: 'Esther Group Benin', defaultAmount: 1000, notes: 'Esther Group Benin Member', totalReceivedAmount: 0, totalTransfersCount: 0, createdAt: '2026-09-01T06:00:00.000Z' },
+  { id: 'ebm-109', fullName: 'NK', phoneNumber: '+234 803 555 0199', network: 'MTN', category: 'Esther Group Benin', defaultAmount: 1000, notes: 'Esther Group Benin Member - NK', totalReceivedAmount: 0, totalTransfersCount: 0, createdAt: '2026-09-01T06:00:00.000Z' }
 ];
 

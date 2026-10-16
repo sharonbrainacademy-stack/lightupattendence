@@ -50,7 +50,7 @@ export const NameMatchingRulesModal: React.FC<NameMatchingRulesModalProps> = ({
   const [activeTab, setActiveTab] = useState<'rules' | 'tester' | 'settings'>('rules');
   const [selectedRuleId, setSelectedRuleId] = useState<string>('rule_phone');
   const [testInput, setTestInput] = useState<string>(
-    '1. Sis Balogun 08058762392\n2. Becky Ughede 07062192372\n3. Joy Aghedo - Present\n4. Imasuen Juliet\n5. From Joy to Everyone: Present\n6. 08065289904\n7. Ughede\n8. Sis Franca'
+    '1. Sis Balogun 08058762392\n2. Becky Ughede 07062192372\n3. Joy Aghedo - Present\n4. Imasuen Juliet\n5. From NK to Everyone: Present\n6. 08065289904\n7. NK\n8. nk - Present\n9. Nk\n10. nK\n11. N.K.\n12. Sis Franca'
   );
   const [settings, setSettings] = useState<NameMatchingSettings>(() => getNameMatchingSettings());
   const [savedSettingsNotice, setSavedSettingsNotice] = useState(false);

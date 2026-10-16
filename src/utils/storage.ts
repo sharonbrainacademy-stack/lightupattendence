@@ -402,6 +402,16 @@ export function getBeneficiaries(): Beneficiary[] {
           deleteDoc(doc(db, 'beneficiaries', b.id)).catch(() => {});
         });
     }
+    const hasNk = clean.some(b => b.fullName.trim().toLowerCase() === 'nk');
+    if (!hasNk && !deletedIds.has('ebm-109')) {
+      const nkMember = INITIAL_REGISTERED_BENEFICIARIES.find(b => b.id === 'ebm-109');
+      if (nkMember) {
+        clean.push(nkMember);
+        localStorage.setItem(BENEFICIARIES_KEY, JSON.stringify(clean));
+        setDoc(doc(db, 'beneficiaries', nkMember.id), sanitizeForFirestore(nkMember)).catch(() => {});
+      }
+    }
+
     return clean;
   } catch (err) {
     console.error('Error reading beneficiaries:', err);

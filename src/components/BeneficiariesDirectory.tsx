@@ -462,6 +462,22 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
               <span>Export Esther Group CSV</span>
             </button>
 
+            {/* Duplicate Name Detector & Cleanup Button */}
+            <button
+              type="button"
+              onClick={() => setIsDuplicatesModalOpen(true)}
+              className="px-3.5 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500/20 to-purple-900/80 hover:from-amber-500/30 hover:to-purple-800 text-amber-300 font-extrabold text-xs flex items-center gap-1.5 border border-amber-500/50 shadow-md cursor-pointer"
+              title="Open Duplicate Name Detector & Cleanup Engine"
+            >
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <span>Duplicate Name Detector</span>
+              {totalDuplicateRedundant > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-rose-600 text-white text-[10px] font-black animate-pulse">
+                  {totalDuplicateRedundant}
+                </span>
+              )}
+            </button>
+
             {currentRole === 'Admin' && (
               <button
                 onClick={() => setIsAddModalOpen(true)}
@@ -743,7 +759,7 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
 
                     <td className="py-3 px-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
-                        {dupeInfo.isDuplicate && currentRole === 'Admin' && (
+                        {dupeInfo.isDuplicate && (currentRole === 'Admin' || currentRole === 'Minister') && (
                           <button
                             type="button"
                             onClick={() => setMemberToDelete(b)}
@@ -1094,6 +1110,7 @@ export const BeneficiariesDirectory: React.FC<BeneficiariesDirectoryProps> = ({
         isOpen={isDuplicatesModalOpen}
         onClose={() => setIsDuplicatesModalOpen(false)}
         beneficiaryDuplicates={duplicateClusters}
+        allBeneficiaries={beneficiaries}
         onDeleteBeneficiary={onDeleteBeneficiary}
         onBatchDeleteBeneficiaries={onBatchDeleteBeneficiaries}
         currentRole={currentRole}

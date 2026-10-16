@@ -27,17 +27,34 @@ export function cleanPastedLine(rawLine: string): CleanedLineResult {
   let line = (rawLine || '').trim();
   if (!line) return { cleanText: '', extractedPhone: '', rawLine: '' };
 
+  // Normalize Unicode diacritics
+  line = line.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+  // Normalize all variations of "NK" (uppercase, lowercase, sentence case, toggle case, dotted "N.K.", "N K", "N-K")
+  line = line.replace(/\bN[\.\-\/\s]+K\b/gi, 'NK');
+  line = line.replace(/\bNK\b[\.]?/gi, 'NK');
+
   // 1. Strip WhatsApp bracketed or unbracketed timestamps e.g. "[5:30 AM, 10/13/2026]", "10/13/2026, 05:22 -"
   line = line.replace(/^\[[^\]]+\]\s*[-–:]?\s*/, '');
   line = line.replace(/^\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{2,4}[,\s]+\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AaPp][Mm])?\s*[-–:]?\s*/, '');
   line = line.replace(/^\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AaPp][Mm])?\s*[-–:]?\s*/, '');
 
   // 2. Strip Zoom chat prefixes e.g. "From Joy Aghedo to Everyone: Present" -> "Joy Aghedo"
-  line = line.replace(/^From\s+(.+?)\s+to\s+Everyone:\s*/i, '$1');
-  line = line.replace(/^From\s+(.+?)\s*:\s*/i, '$1');
+  line = line.replace(/^From\s+(.+?)\s+to\s+Everyone\s*:\s*(.*)$/i, (_m, sender, msg) => {
+    if (!msg || /^(?:present|here|good morning|amen|online|attended|joined|yes|checking in)\b/i.test(msg.trim())) {
+      return sender;
+    }
+    return `${sender} ${msg}`;
+  });
+  line = line.replace(/^From\s+(.+?)\s*:\s*(.*)$/i, (_m, sender, msg) => {
+    if (!msg || /^(?:present|here|good morning|amen|online|attended|joined|yes|checking in)\b/i.test(msg.trim())) {
+      return sender;
+    }
+    return `${sender} ${msg}`;
+  });
 
   // 3. Strip message suffixes e.g. ": Present", ": good morning", ": joined", ": here"
-  line = line.replace(/^(.+?)\s*:\s*(?:present|here|good morning|amen|online|attended|joined|yes|checking in).*$/i, '$1');
+  line = line.replace(/^(.+?)\s*[-–:]\s*(?:present|here|good morning|amen|online|attended|joined|yes|checking in).*$/i, '$1');
 
   // 4. Extract any phone number sequence before stripping characters
   const phoneMatch = line.match(/(?:\+?234|0)[789][01]\d{8}/) || line.match(/\d{4}[\s-]?\d{3}[\s-]?\d{4}/);
@@ -63,7 +80,7 @@ export function cleanPastedLine(rawLine: string): CleanedLineResult {
   line = line.replace(/\b(?:ESG|Esther Group|Esther Group Benin|Peace Group|LPH|AGL|GL|Benin|Branch)\b/gi, ' ');
   line = line.replace(/\b(?:Present|Absent|Late|Excused|Attended|Here|Online|Zoom|WhatsApp|Checked in|Morning Devotional|Daily Prayer|Prayer|Amen|Good morning)\b/gi, ' ');
 
-  // 9. Normalize whitespace and remove remaining non-alphanumeric punctuation
+  // 9. Normalize whitespace and remove remaining non-alphanumeric punctuation (ensures case-insensitivity)
   line = line.replace(/[^a-zA-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
 
   return { cleanText: line, extractedPhone, rawLine };
@@ -144,7 +161,7 @@ export function buildBeneficiaryIndex(beneficiaries: Beneficiary[]): Beneficiary
       b.aliases.forEach(a => addVariant(a));
     }
 
-    const variantTokenSets = nameVariants.map(v => v.split(' ').filter(t => t.length >= 2));
+    const variantTokenSets = nameVariants.map(v => v.split(' ').filter(t => t.length >= 2 || t === 'nk'));
 
     return {
       beneficiary: b,
@@ -166,6 +183,11 @@ export interface LineMatchResult {
 
 /**
  * Match a single line from pasted text against our beneficiary index
+ * Rules strictly enforce:
+ * 1. Single name matches a single name only.
+ * 2. Group of names matches a group of names only.
+ * 3. "NK" is recognized as a name and always matches to "NK".
+ * 4. Matching is case-insensitive (UPPERCASE, lowercase, Sentence Case, tOGGLE cASE).
  */
 export function matchLineToBeneficiary(
   rawLine: string,
@@ -201,7 +223,28 @@ export function matchLineToBeneficiary(
     };
   }
 
-  const lineTokens = cleanText.split(' ').filter(t => t.length >= 2);
+  const lineTokens = cleanText.split(' ').filter(t => t.length >= 2 || t === 'nk');
+  const isInputSingleName = (lineTokens.length === 1);
+  const isInputGroupOfNames = (lineTokens.length >= 2);
+
+  // Priority: "NK" is a distinctive single name and must always match to "NK"
+  // Handles any casing: NK, nk, Nk, nK, N.K., N.K, N K, N-K
+  if (cleanText === 'nk' || (isInputSingleName && lineTokens[0] === 'nk')) {
+    const nkMatch = index.find(bObj => 
+      bObj.nameVariants.some(v => v === 'nk') || 
+      bObj.beneficiary.fullName.trim().toLowerCase() === 'nk'
+    );
+    if (nkMatch) {
+      return {
+        matched: nkMatch.beneficiary,
+        reason: 'Direct match for member "NK"',
+        score: 100,
+        ruleId: 'rule_nk_name',
+        ruleName: 'Rule: Direct NK Name Match'
+      };
+    }
+  }
+
   let bestB: Beneficiary | null = null;
   let bestScore = 0;
   let bestReason = '';
@@ -214,8 +257,17 @@ export function matchLineToBeneficiary(
     let currentRuleId = 'rule_none';
     let currentRuleName = 'Unmatched';
 
-    // A. Exact Name Match with any variant - Rule 2
-    for (const variant of bObj.nameVariants) {
+    // A. Exact Name Match with any variant - Rule 2 (Strict Partitioning)
+    for (let vIdx = 0; vIdx < bObj.nameVariants.length; vIdx++) {
+      const variant = bObj.nameVariants[vIdx];
+      const targetTokens = bObj.variantTokenSets[vIdx] || [];
+      const isTargetSingleName = (targetTokens.length === 1);
+      const isTargetGroupOfNames = (targetTokens.length >= 2);
+
+      // Single name matches single name only; group of names matches group of names only
+      if (isInputSingleName && !isTargetSingleName) continue;
+      if (isInputGroupOfNames && !isTargetGroupOfNames) continue;
+
       if (cleanText === variant) {
         score = 99;
         reason = `Exact name match "${variant}"`;
@@ -230,7 +282,16 @@ export function matchLineToBeneficiary(
       for (const targetTokens of bObj.variantTokenSets) {
         if (targetTokens.length === 0) continue;
 
-        if (lineTokens.length >= 2 && targetTokens.length >= 2) {
+        const isTargetSingleName = (targetTokens.length === 1);
+        const isTargetGroupOfNames = (targetTokens.length >= 2);
+
+        // Strict Partitioning:
+        // A single name matches a single name only; a group of names matches a group of names only.
+        if (isInputSingleName && !isTargetSingleName) continue;
+        if (isInputGroupOfNames && !isTargetGroupOfNames) continue;
+
+        // CASE 1: Group of Names vs Group of Names (2+ tokens)
+        if (isInputGroupOfNames && isTargetGroupOfNames) {
           // Count matched tokens
           let matchCount = 0;
           for (const tt of targetTokens) {
@@ -267,71 +328,63 @@ export function matchLineToBeneficiary(
               currentRuleName = 'Rule 4: Multi-Token Subset Match';
             }
           }
-        } else if (lineTokens.length === 1 && targetTokens.length === 1) {
-          // Single word vs single word
+        } 
+        // CASE 2: Single Name vs Single Name (1 token only)
+        else if (isInputSingleName && isTargetSingleName) {
           const lt = lineTokens[0];
           const tt = targetTokens[0];
           if (lt === tt) {
-            score = 92;
-            reason = `Single name match "${tt}"`;
-            currentRuleId = 'rule_key_name';
-            currentRuleName = 'Rule 5: Distinctive Key Name Match';
+            const isNK = (lt === 'nk' && tt === 'nk');
+            const currentScore = isNK ? 100 : 95;
+            if (currentScore > score) {
+              score = currentScore;
+              reason = isNK ? 'Exact match for name "NK"' : `Single name exact match "${tt}"`;
+              currentRuleId = isNK ? 'rule_nk_name' : 'rule_key_name';
+              currentRuleName = isNK ? 'Rule: Direct NK Name Match' : 'Rule 5: Single Name to Single Name Match';
+            }
           } else if (lt.length >= 4 && tt.length >= 4 && (lt.startsWith(tt) || tt.startsWith(lt))) {
-            score = 88;
-            reason = `Prefix match "${tt}"`;
-            currentRuleId = 'rule_key_name';
-            currentRuleName = 'Rule 5: Distinctive Key Name Match';
-          } else if (getSimilarity(lt, tt) >= 0.85) {
-            score = 82;
-            reason = `Fuzzy match "${tt}"`;
-            currentRuleId = 'rule_fuzzy';
-            currentRuleName = 'Rule 8: Fuzzy Typo Tolerance Match';
-          }
-        } else if (lineTokens.length >= 2 && targetTokens.length === 1) {
-          // e.g. Line has "Tessy Omoregie" vs DB has "Tessy"
-          const tt = targetTokens[0];
-          if (lineTokens.includes(tt)) {
-            score = 88;
-            reason = `Contained name "${tt}"`;
-            currentRuleId = 'rule_subset_token';
-            currentRuleName = 'Rule 4: Multi-Token Subset Match';
-          }
-        } else if (lineTokens.length === 1 && targetTokens.length >= 2) {
-          // e.g. Line has "Ughede" or "Balogun" and DB has "Mrs Becky Ughede" or "Sister Balogun AGL"
-          const lt = lineTokens[0];
-          if (lt.length >= 3) {
-            const exactWordMatch = targetTokens.some(tt => tt === lt);
-            if (exactWordMatch) {
-              const currentScore = 91;
-              if (currentScore > score) {
-                score = currentScore;
-                reason = `Key name "${lt}" in (${targetTokens.join(' ')})`;
-                currentRuleId = 'rule_key_name';
-                currentRuleName = 'Rule 5: Distinctive Key Name Match';
-              }
-            } else {
-              const fuzzyWordMatch = targetTokens.some(tt => 
-                (tt.length >= 4 && (tt.startsWith(lt) || lt.startsWith(tt))) || 
-                getSimilarity(lt, tt) >= 0.85
-              );
-              if (fuzzyWordMatch) {
-                const currentScore = 82;
-                if (currentScore > score) {
-                  score = currentScore;
-                  reason = `Fuzzy key name "${lt}" in (${targetTokens.join(' ')})`;
-                  currentRuleId = 'rule_fuzzy';
-                  currentRuleName = 'Rule 8: Fuzzy Typo Tolerance Match';
-                }
-              }
+            const currentScore = 88;
+            if (currentScore > score) {
+              score = currentScore;
+              reason = `Single name prefix match "${tt}"`;
+              currentRuleId = 'rule_key_name';
+              currentRuleName = 'Rule 5: Single Name to Single Name Match';
+            }
+          } else if (lt.length >= 3 && tt.length >= 3 && getSimilarity(lt, tt) >= 0.85) {
+            const currentScore = 82;
+            if (currentScore > score) {
+              score = currentScore;
+              reason = `Single name fuzzy match "${tt}"`;
+              currentRuleId = 'rule_fuzzy';
+              currentRuleName = 'Rule 8: Fuzzy Typo Tolerance Match';
             }
           }
         }
       }
     }
 
-    // C. Whole String Fuzzy Similarity (handles single letter typos e.g. Imasuen/Imasuem) - Rule 8
+    // C. Whole String Fuzzy Similarity (handles single letter typos e.g. Imasuen/Imasuem) - Rule 8 (Strict Partitioning)
     if (score < 80) {
-      for (const variant of bObj.nameVariants) {
+      for (let vIdx = 0; vIdx < bObj.nameVariants.length; vIdx++) {
+        const variant = bObj.nameVariants[vIdx];
+        const targetTokens = bObj.variantTokenSets[vIdx] || [];
+        const isTargetSingleName = (targetTokens.length === 1);
+        const isTargetGroupOfNames = (targetTokens.length >= 2);
+
+        // Strict Partitioning: never fuzzy match single to group or group to single
+        if (isInputSingleName && !isTargetSingleName) continue;
+        if (isInputGroupOfNames && !isTargetGroupOfNames) continue;
+
+        // Skip fuzzy comparisons for short strings (length <= 2) like 'nk' to avoid false matches
+        if (cleanText.length <= 2 || variant.length <= 2) {
+          if (cleanText === variant) {
+            score = 100;
+            reason = `Exact match for "${variant}"`;
+            break;
+          }
+          continue;
+        }
+
         const sim = getSimilarity(cleanText, variant);
         if (sim >= 0.82) {
           const currentScore = Math.round(sim * 90);
@@ -386,6 +439,11 @@ export interface AttendanceAutoMatchResult {
     ruleName: string;
   }>;
   discardedEntries: string[];
+  duplicatePastedEntries?: Array<{
+    line: string;
+    member: Beneficiary;
+    reason: string;
+  }>;
   totalLinesProcessed: number;
   ruleBreakdown: Record<string, number>;
 }
@@ -464,6 +522,11 @@ export function processAttendanceText(
     ruleName: string;
   }> = [];
   const discardedEntries: string[] = [];
+  const duplicatePastedEntries: Array<{
+    line: string;
+    member: Beneficiary;
+    reason: string;
+  }> = [];
   const ruleBreakdown: Record<string, number> = {};
 
   lines.forEach(line => {
@@ -485,6 +548,13 @@ export function processAttendanceText(
           ruleName: res.ruleName
         });
         ruleBreakdown[res.ruleName] = (ruleBreakdown[res.ruleName] || 0) + 1;
+      } else {
+        // Track duplicate line pasted for an already-matched member
+        duplicatePastedEntries.push({
+          line,
+          member: res.matched,
+          reason: `Duplicate line in paste list for "${res.matched.fullName}"`
+        });
       }
     } else {
       const cleanDisplay = line.replace(/^[•\-\*\+\~\✓\>#\d]+[\.\)\-\:\s]*/, '').trim();
@@ -502,6 +572,7 @@ export function processAttendanceText(
     absentMembers,
     matchedEntries,
     discardedEntries,
+    duplicatePastedEntries,
     totalLinesProcessed: lines.length,
     ruleBreakdown
   };

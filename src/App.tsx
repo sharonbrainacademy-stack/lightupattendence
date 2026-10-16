@@ -276,6 +276,8 @@ export default function App() {
               onSaveSession={handleSaveAttendanceSession}
               onDeleteSession={handleDeleteAttendanceSession}
               onUpdateBeneficiary={handleUpdateBeneficiary}
+              onDeleteBeneficiary={handleDeleteBeneficiary}
+              onBatchDeleteBeneficiaries={handleBatchDeleteBeneficiaries}
               onNavigateToBulkMsg={handleNavigateToBulkMsg}
               initialSelectedSessionId={targetSessionIdForTracker}
               onClearInitialSelectedSessionId={() => setTargetSessionIdForTracker(null)}

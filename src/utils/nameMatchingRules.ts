@@ -123,27 +123,37 @@ export const OFFICIAL_NAME_MATCHING_RULES: NameMatchingRuleDefinition[] = [
   {
     id: 'rule_key_name',
     ruleNumber: 5,
-    name: 'Distinctive Unique Key Name Resolution',
+    name: 'Strict Single-to-Single & Group-to-Group Resolution ("NK" & Single Names)',
     category: 'Single Name',
-    confidence: 91,
-    badge: '🔑 91% Key Name',
-    shortDescription: 'Accurately resolves single distinctive surnames or first names when they uniquely identify one member.',
-    detailedLogic: 'In fast WhatsApp responses, members frequently reply with just their distinctive surname or first name (e.g. "Ughede", "Balogun", "Franca", "Iyamu"). The engine tests the single token against all registered members. If it uniquely matches one member, it is safely marked at 91% confidence instead of being discarded.',
+    confidence: 100,
+    badge: '🔑 100% Strict Single Name',
+    shortDescription: 'Permits a single name to match a single name only, and a group of names a group of names only. NK is recognized as a name and always matches NK across all casing formats.',
+    detailedLogic: 'To eliminate false positives, a single name (1 word) strictly matches single-name directory members only and never crosses to multi-word members. Likewise, multi-word group names match only multi-word records. "NK" is officially recognized as a distinct member name and always resolves to NK with 100% precision regardless of casing (UPPERCASE, lowercase, Sentence Case, or tOGGLE cASE).',
     examples: [
       {
-        input: '1. Ughede',
-        expectedOutcome: 'Matched: Mrs Becky Ughede',
-        explanation: 'The distinctive surname "Ughede" uniquely resolves to Mrs Becky Ughede.'
+        input: '1. NK',
+        expectedOutcome: 'Matched: NK (+234 803 555 0199)',
+        explanation: 'Uppercase "NK" maps directly to member NK with 100% confidence.'
       },
       {
-        input: '2. Sis Balogun',
-        expectedOutcome: 'Matched: Sister Balogun AGL',
-        explanation: 'Title "Sis" is cleaned, leaving "Balogun" which maps to Sister Balogun.'
+        input: '2. nk - Present',
+        expectedOutcome: 'Matched: NK (+234 803 555 0199)',
+        explanation: 'Lowercase "nk" matches member NK case-insensitively.'
       },
       {
-        input: '3. Franca',
+        input: '3. nK',
+        expectedOutcome: 'Matched: NK (+234 803 555 0199)',
+        explanation: 'Toggle case "nK" or sentence case "Nk" matches member NK seamlessly.'
+      },
+      {
+        input: '4. N.K.',
+        expectedOutcome: 'Matched: NK (+234 803 555 0199)',
+        explanation: 'Dotted notation "N.K." is normalized to NK.'
+      },
+      {
+        input: '5. Franca',
         expectedOutcome: 'Matched: Sister Franca GL',
-        explanation: 'Single first name "Franca" resolves directly to Sister Franca.'
+        explanation: 'Single name "Franca" resolves to single-name directory member Sister Franca.'
       }
     ]
   },

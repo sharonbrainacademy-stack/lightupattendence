@@ -2,10 +2,11 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Calendar, UserCheck, UserX, Clock, CheckCircle2, Search, Filter, Sparkles, MessageSquare, History, Plus, Save, Trash2, ArrowRight, ShieldCheck, Download, Upload, FileText, X, AlertCircle, HelpCircle, Check, Zap, ArrowRightLeft, BookOpen, Tag } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { Beneficiary, AttendanceSession, AttendanceRecordItem, AttendanceStatus, UserRole, MinistryGroup } from '../types';
-import { findDuplicateAttendanceSessions } from '../utils/duplicateDetector';
+import { findDuplicateAttendanceSessions, findDuplicateBeneficiaries } from '../utils/duplicateDetector';
 import { processAttendanceText, AttendanceAutoMatchResult, cleanPastedLine, getSimilarity } from '../utils/attendanceMatcher';
 import { AttendanceRulesModal } from './AttendanceRulesModal';
 import { NameMatchingRulesModal } from './NameMatchingRulesModal';
+import { DuplicateRecordsModal } from './DuplicateRecordsModal';
 import { getNameMatchingSettings } from '../utils/nameMatchingRules';
 
 interface AttendanceTrackerProps {
@@ -19,6 +20,8 @@ interface AttendanceTrackerProps {
   onSaveSession: (session: AttendanceSession) => void;
   onDeleteSession: (id: string) => void;
   onUpdateBeneficiary?: (b: Beneficiary) => void;
+  onDeleteBeneficiary?: (id: string) => void;
+  onBatchDeleteBeneficiaries?: (ids: string[]) => void;
   onNavigateToBulkMsg: (targetCategory: string, preSelectedPhones?: string[], preSelectedNames?: string[]) => void;
   initialSelectedSessionId?: string | null;
   onClearInitialSelectedSessionId?: () => void;
@@ -35,6 +38,8 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
   onSaveSession,
   onDeleteSession,
   onUpdateBeneficiary,
+  onDeleteBeneficiary,
+  onBatchDeleteBeneficiaries,
   onNavigateToBulkMsg,
   initialSelectedSessionId,
   onClearInitialSelectedSessionId,
@@ -182,6 +187,13 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
     () => findDuplicateAttendanceSessions(attendanceSessions),
     [attendanceSessions]
   );
+
+  // Identify duplicate beneficiaries in directory
+  const duplicateClusters = useMemo(
+    () => findDuplicateBeneficiaries(beneficiaries),
+    [beneficiaries]
+  );
+  const [isDuplicatesModalOpen, setIsDuplicatesModalOpen] = useState(false);
 
   // Auto-Mark Attendance Modal via Text Paste / File Upload
   const [isAutoMarkModalOpen, setIsAutoMarkModalOpen] = useState(false);
@@ -1621,6 +1633,22 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
               <span>🔍 Name Matching Rules</span>
             </button>
 
+            {/* Duplicate Name & Records Detector */}
+            <button
+              type="button"
+              onClick={() => setIsDuplicatesModalOpen(true)}
+              className="px-3.5 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500/20 to-purple-900/80 hover:from-amber-500/30 hover:to-purple-800 text-amber-300 border border-amber-500/50 text-xs font-black flex items-center gap-1.5 shadow-lg cursor-pointer transition-all"
+              title="Open Duplicate Name Detector & Cleanup Engine"
+            >
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <span>Duplicate Detector</span>
+              {(duplicateClusters.reduce((acc, c) => acc + c.duplicates.length, 0) + duplicateSessions.reduce((acc, c) => acc + (c.sessions.length - 1), 0)) > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-rose-600 text-white text-[10px] font-black animate-pulse">
+                  {duplicateClusters.reduce((acc, c) => acc + c.duplicates.length, 0) + duplicateSessions.reduce((acc, c) => acc + (c.sessions.length - 1), 0)}
+                </span>
+              )}
+            </button>
+
             <button
               onClick={() => setIsRulesModalOpen(true)}
               className="px-3.5 py-2.5 rounded-2xl bg-purple-900/80 hover:bg-purple-800 text-purple-200 border border-purple-700 text-xs font-bold flex items-center gap-1.5 shadow-lg cursor-pointer transition-all"
@@ -2945,6 +2973,25 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
                   </div>
                 )}
 
+                {/* Duplicate Pasted Entries Detected Alert */}
+                {autoMatchResult.duplicatePastedEntries && autoMatchResult.duplicatePastedEntries.length > 0 && (
+                  <div className="p-3 rounded-xl bg-amber-950/70 border border-amber-500/50 text-amber-200 text-xs space-y-1.5 animate-fadeIn">
+                    <div className="flex items-center gap-2 font-bold text-amber-300">
+                      <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>
+                        ⚠️ {autoMatchResult.duplicatePastedEntries.length} Duplicate Attendee Line{autoMatchResult.duplicatePastedEntries.length === 1 ? '' : 's'} Detected &amp; Cleaned Up:
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {autoMatchResult.duplicatePastedEntries.map((dupe, dIdx) => (
+                        <span key={dIdx} className="px-2 py-0.5 rounded-lg bg-purple-900/60 border border-amber-500/30 text-[10px] font-mono text-amber-200">
+                          {dupe.line} &rarr; <strong>{dupe.member.fullName}</strong>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Instant Action Banner when members are matched */}
                 {autoMatchResult.presentMembers.length > 0 && (
                   <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950 via-teal-950 to-purple-950 border border-emerald-500/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-emerald-200 shadow-xl">
@@ -3571,6 +3618,19 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
           </div>
         </div>
       )}
+
+      {/* Duplicate Records Inspector & Cleanup Modal */}
+      <DuplicateRecordsModal
+        isOpen={isDuplicatesModalOpen}
+        onClose={() => setIsDuplicatesModalOpen(false)}
+        beneficiaryDuplicates={duplicateClusters}
+        sessionDuplicates={duplicateSessions}
+        allBeneficiaries={beneficiaries}
+        onDeleteBeneficiary={onDeleteBeneficiary || (() => {})}
+        onBatchDeleteBeneficiaries={onBatchDeleteBeneficiaries}
+        onDeleteSession={onDeleteSession}
+        currentRole={currentRole}
+      />
 
     </div>
   );
