@@ -30,57 +30,72 @@ export function cleanPastedLine(rawLine: string): CleanedLineResult {
   // Normalize Unicode diacritics
   line = line.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
-  // Normalize all variations of "NK" (uppercase, lowercase, sentence case, toggle case, dotted "N.K.", "N K", "N-K")
-  line = line.replace(/\bN[\.\-\/\s]+K\b/gi, 'NK');
-  line = line.replace(/\bNK\b[\.]?/gi, 'NK');
+  // 1. Strip list numbering, bullets, emojis, checkboxes, hashes AT THE VERY START
+  // E.g. "1.", "1 -", "1)", "1:", "•", "-", "*", "#1.", "No. 1:", "No 1 -"
+  line = line.replace(/^(?:No\.?\s*\d+|\d+|[•\-\*\+\~\✓\>#])[\.\)\-\:\s]+/gi, '');
+  line = line.replace(/^[•\-\*\+\~\✓\>#\s]+/g, '');
 
-  // 1. Strip WhatsApp bracketed or unbracketed timestamps e.g. "[5:30 AM, 10/13/2026]", "10/13/2026, 05:22 -"
+  // 2. Strip WhatsApp bracketed or unbracketed timestamps e.g. "[5:30 AM, 10/13/2026]", "10/13/2026, 05:22 -"
   line = line.replace(/^\[[^\]]+\]\s*[-–:]?\s*/, '');
   line = line.replace(/^\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{2,4}[,\s]+\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AaPp][Mm])?\s*[-–:]?\s*/, '');
   line = line.replace(/^\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AaPp][Mm])?\s*[-–:]?\s*/, '');
 
-  // 2. Strip Zoom chat prefixes e.g. "From Joy Aghedo to Everyone: Present" -> "Joy Aghedo"
-  line = line.replace(/^From\s+(.+?)\s+to\s+Everyone\s*:\s*(.*)$/i, (_m, sender, msg) => {
-    if (!msg || /^(?:present|here|good morning|amen|online|attended|joined|yes|checking in)\b/i.test(msg.trim())) {
+  // 3. Strip Zoom chat prefixes e.g. "From Joy Aghedo to Everyone: Present" -> "Joy Aghedo"
+  line = line.replace(/^From\s+(.+?)\s+to\s+(?:Everyone|Me|Hosts?|Co-hosts?)(?:\s*\([^)]*\))?\s*:\s*(.*)$/i, (_m, sender, msg) => {
+    if (!msg || /^(?:present|here|good morning|amen|online|attended|joined|yes|checking in|check in|available)\b/i.test(msg.trim())) {
       return sender;
     }
     return `${sender} ${msg}`;
   });
   line = line.replace(/^From\s+(.+?)\s*:\s*(.*)$/i, (_m, sender, msg) => {
-    if (!msg || /^(?:present|here|good morning|amen|online|attended|joined|yes|checking in)\b/i.test(msg.trim())) {
+    if (!msg || /^(?:present|here|good morning|amen|online|attended|joined|yes|checking in|check in|available)\b/i.test(msg.trim())) {
       return sender;
     }
     return `${sender} ${msg}`;
   });
 
-  // 3. Strip message suffixes e.g. ": Present", ": good morning", ": joined", ": here"
-  line = line.replace(/^(.+?)\s*[-–:]\s*(?:present|here|good morning|amen|online|attended|joined|yes|checking in).*$/i, '$1');
+  // 4. Strip message status suffixes e.g. ": Present", "- Present", "present", "good morning", "amen"
+  line = line.replace(/^(.+?)\s*[-–:]\s*(?:present|here|good morning|amen|online|attended|joined|yes|checking in|check in|available).*$/i, '$1');
+  line = line.replace(/\s+(?:present|here|good morning|amen|online|attended|joined|checking in|check in|available)\s*$/i, '');
 
-  // 4. Extract any phone number sequence before stripping characters
+  // 5. Strip device suffixes & hardware labels
+  line = line.replace(/'s\s+(?:iPhone|phone|Android|device|iPad|tablet)/gi, ' ');
+  line = line.replace(/\b(?:iPhone|Android|iPad|Galaxy|Infinix|Tecno|Redmi|Phone)\b/gi, ' ');
+  line = line.replace(/\s*\((?:Host|Co-host|Host & Co-host|Me|Guest|Participant)\)/gi, ' ');
+  line = line.replace(/\b(?:Host|Co-host|Host & Co-host|Guest|Participant)\b/gi, ' ');
+
+  // 6. Comprehensive ESG & Ministry Group stripping (both inside brackets AND outside brackets)
+  // Inside brackets/parentheses/curlies/angles: e.g. (ESG), [ESG], {ESG}, <ESG>, (E.S.G.), (E. S. G.), (esg), (ESG Benin), (ESG-Benin), (ESG Member), (Esther Group), (Esther Group Benin), (PG), [PG], (Peace Group)
+  line = line.replace(/[\(\[\{<]\s*(?:E[\.\-\s]*S[\.\-\s]*G[\.\s]*|Esther(?:\s+(?:Support|Service)?\s*Group)?|P[\.\-\s]*G[\.\s]*|Peace(?:\s+Group)?)(?:\s*[\-\/]?\s*Benin)?(?:\s+Member)?\s*[\)\]\}>]/gi, ' ');
+
+  // Outside brackets preceded by delimiter or space: " - ESG", ", ESG", "/ESG", "_ESG", ": ESG", " ESG", " ESG Benin", " ESG Member"
+  line = line.replace(/(?:[\s,;:\-–—/_]+)(?:E[\.\-\s]*S[\.\-\s]*G[\.\s]*|Esther\s+(?:Support\s+|Service\s+)?Group|Peace\s+Group|P[\.\-\s]*G[\.\s]*)(?:\s*[\-\/]?\s*Benin)?(?:\s+Member)?(?=$|[\s,;:\-–—/_\)\]\}>])/gi, ' ');
+
+  // Standalone ESG / E.S.G. anywhere in the line
+  line = line.replace(/\bE[\.\-\s]*S[\.\-\s]*G[\.\s]*/gi, ' ');
+  line = line.replace(/\bEsther\s+(?:Support\s+|Service\s+)?Group(?:\s+Benin)?\b/gi, ' ');
+  line = line.replace(/\bPeace\s+Group(?:\s+Benin)?\b/gi, ' ');
+  line = line.replace(/(?:[\s,;:\-–—/_]+)(?:Benin|Branch|Member)(?=$|[\s,;:\-–—/_\)\]\}>])/gi, ' ');
+
+  // 7. Extract any phone number sequence before stripping characters
   const phoneMatch = line.match(/(?:\+?234|0)[789][01]\d{8}/) || line.match(/\d{4}[\s-]?\d{3}[\s-]?\d{4}/);
   let extractedPhone = '';
   if (phoneMatch) {
     extractedPhone = normalizePhone(phoneMatch[0]);
-    // Replace the phone from the line so it doesn't pollute name matching
     line = line.replace(phoneMatch[0], ' ');
   }
 
-  // 5. Strip list numbering, bullets, emojis, checkboxes
-  line = line.replace(/^[•\-\*\+\~\✓\>#\d]+[\.\)\-\:\s]*/, '');
-  line = line.replace(/^No\.?\s*\d+[\.\)\-\:\s]*/i, '');
+  // 8. Normalize all variations of "NK" (uppercase, lowercase, sentence case, toggle case, dotted "N.K.", "N K", "N-K")
+  line = line.replace(/\bN[\.\-\/\s]+K\b/gi, 'NK');
+  line = line.replace(/\bNK\b[\.]?/gi, 'NK');
 
-  // 6. Strip device suffixes & hardware labels
-  line = line.replace(/'s\s+(?:iPhone|phone|Android|device|iPad|tablet)/gi, ' ');
-  line = line.replace(/\b(?:iPhone|Android|iPad|Galaxy|Infinix|Tecno|Redmi|Phone|Host|Co-host|Host & Co-host|Me|Guest|Participant)\b/gi, ' ');
+  // 9. Strip religious and ministry honorifics/titles
+  line = line.replace(/\b(?:Pastor|Pastors|Pst|Rev|Reverend|Bishop|Apostle|Deacon|Dcn|Deaconess|Dcns|Elder|Evangelist|Evang|Minister|Min|Brother|Bro|Sister|Sis|Mrs|Mr|Miss|Mama|Madam|Mummy|Daddy|Dr|Engr|Barr|Chief|LPH|AGL|GL)\b/gi, ' ');
 
-  // 7. Strip religious and ministry honorifics/titles
-  line = line.replace(/\b(?:Pastor|Pastors|Pst|Rev|Reverend|Bishop|Apostle|Deacon|Dcn|Deaconess|Dcns|Elder|Evangelist|Evang|Minister|Min|Brother|Bro|Sister|Sis|Mrs|Mr|Miss|Mama|Madam|Mummy|Daddy|Dr|Engr|Barr|Chief)\b/gi, ' ');
-
-  // 8. Strip group tags, branches, status flags
-  line = line.replace(/\b(?:ESG|Esther Group|Esther Group Benin|Peace Group|LPH|AGL|GL|Benin|Branch)\b/gi, ' ');
+  // 10. Strip status keywords & meeting greetings
   line = line.replace(/\b(?:Present|Absent|Late|Excused|Attended|Here|Online|Zoom|WhatsApp|Checked in|Morning Devotional|Daily Prayer|Prayer|Amen|Good morning)\b/gi, ' ');
 
-  // 9. Normalize whitespace and remove remaining non-alphanumeric punctuation (ensures case-insensitivity)
+  // 11. Normalize whitespace and remove remaining non-alphanumeric punctuation (ensures case-insensitivity)
   line = line.replace(/[^a-zA-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
 
   return { cleanText: line, extractedPhone, rawLine };
@@ -136,12 +151,17 @@ export function buildBeneficiaryIndex(beneficiaries: Beneficiary[]): Beneficiary
     const bShortPhone = bPhone.length >= 7 ? bPhone.slice(-7) : bPhone;
 
     // Extract inside-bracket aliases e.g. "Mrs J Imasuem(Mrs Juliet Imasuen)" -> "Mrs Juliet Imasuen"
+    // Strictly ignore ESG, Esther Group, or Peace Group bracketed tags
     const insideAliases: string[] = [];
-    const bracketMatches = Array.from(bName.matchAll(/\(([^)]+)\)/g));
+    const bracketMatches = Array.from(bName.matchAll(/[\(\[]([^\)\]]+)[\)\]]/g));
     bracketMatches.forEach(m => {
-      if (m[1] && m[1].trim()) insideAliases.push(m[1].trim());
+      const insideText = (m[1] || '').trim();
+      const isGroupTag = /^(?:E[\.\-\s]*S[\.\-\s]*G[\.\s]*|Esther(?:\s+(?:Support|Service)?\s*Group)?|P[\.\-\s]*G[\.\s]*|Peace(?:\s+Group)?)(?:\s*[\-\/]?\s*Benin)?(?:\s+Member)?$/i.test(insideText);
+      if (insideText && !isGroupTag) {
+        insideAliases.push(insideText);
+      }
     });
-    const outsideName = bName.replace(/\([^)]*\)/g, ' ').trim();
+    const outsideName = bName.replace(/[\(\[][^\)\]]*[\)\]]/g, ' ').trim();
 
     const nameVariants: string[] = [];
     const addVariant = (raw: string) => {
@@ -484,9 +504,17 @@ export function splitAttendanceLines(rawText: string): string[] {
       return;
     }
 
-    // Handle comma or semicolon separated lists if not part of a single name or phone
-    if ((trimmed.includes(';') || trimmed.includes(',')) && !trimmed.startsWith('[') && !/\d{4,}/.test(trimmed)) {
-      const splitList = trimmed.split(/;|,/);
+    // Protect commas inside dates (e.g. "10/26/2026, 05:30") or Zoom headers or before ESG/tags/status
+    const withoutLeadingNum = trimmed.replace(/^(?:No\.?\s*\d+|\d+|[•\-\*\+\~\✓\>#])[\.\)\-\:\s]+/gi, '').trim();
+    const isWhatsAppLine = /^\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{2,4}[,\s]+\d{1,2}:\d{2}/.test(withoutLeadingNum) || /^\[[^\]]+\]/.test(withoutLeadingNum);
+    const isZoomLine = /^From\s+.+?\s+(?:to|:)/i.test(withoutLeadingNum);
+
+    // If comma is followed by ESG / tags / status / honorifics (e.g. "Joy Aghedo, ESG" or "Joy Aghedo, Present"), replace comma with space so line stays intact
+    const sanitizedCommas = trimmed.replace(/,\s*(?:E[\.\-\s]*S[\.\-\s]*G|Esther|P[\.\-\s]*G|Peace|Present|Absent|Late|GL|AGL|LPH)\b/gi, ' ');
+
+    // Handle comma or semicolon separated lists of multiple participants (e.g. "Joy Aghedo (ESG), Juliet Johnson (ESG)")
+    if (!isWhatsAppLine && !isZoomLine && (sanitizedCommas.includes(';') || sanitizedCommas.includes(',')) && !sanitizedCommas.startsWith('[') && !/\d{4,}/.test(sanitizedCommas)) {
+      const splitList = sanitizedCommas.split(/;|,/);
       splitList.forEach(item => {
         const itemTrimmed = item.trim();
         if (itemTrimmed.length >= 2) rawLines.push(itemTrimmed);

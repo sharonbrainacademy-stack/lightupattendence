@@ -160,27 +160,37 @@ export const OFFICIAL_NAME_MATCHING_RULES: NameMatchingRuleDefinition[] = [
   {
     id: 'rule_honorific',
     ruleNumber: 6,
-    name: 'Ministry Honorific & Religious Title Cleansing',
+    name: 'ESG Group Tag & Ministry Title Cleansing',
     category: 'Noise Filter',
     confidence: 92,
-    badge: '👑 92% Title Cleaned',
-    shortDescription: 'Strips ministry titles, honorifics, and group designations before matching names.',
-    detailedLogic: 'Titles such as "Pastor", "Pst", "Reverend", "Rev", "Deaconess", "Dcns", "Elder", "Minister", "Brother", "Bro", "Sister", "Sis", "Mrs", "Mr", "Mama", "Madam", "AGL", "GL", and group designations ("Esther Group", "Peace Group") are automatically stripped to reveal the member\'s true identity.',
+    badge: '👑 92% Title & ESG Cleaned',
+    shortDescription: 'Comprehensively ignores "ESG" (either inside brackets or outside brackets after any name), group tags, and ministry titles.',
+    detailedLogic: 'Members often add "ESG" or ministry designations after their names in roll calls, such as "Joy Aghedo (ESG)", "Joy Aghedo ESG", "Joy Aghedo - ESG", "Joy Aghedo, ESG", "Edith Aghedo (E.S.G.)", "Joy Aghedo (ESG Benin)", or "NK (ESG)". The matching engine strictly ignores ESG across all casing, bracketed ([ESG], (ESG), {ESG}), and unbracketed variations so it never pollutes name matching or single-to-group partitioning. Titles like "Pastor", "Pst", "Deaconess", "Sister", "Sis", "Mrs", "AGL", "GL" are also cleanly stripped.',
     examples: [
       {
-        input: 'Sister Tessy Omoregie',
-        expectedOutcome: 'Matched: Tessy (1) / Tessy Omoregie',
-        explanation: '"Sister" is stripped, matching "Tessy Omoregie" cleanly.'
+        input: '1. Juliet Johnson (ESG)',
+        expectedOutcome: 'Matched: Juliet Johnson',
+        explanation: 'Brackets and "ESG" are ignored, leaving canonical "Juliet Johnson".'
+      },
+      {
+        input: 'Joy Aghedo - ESG',
+        expectedOutcome: 'Matched: Joy AGHEDO',
+        explanation: 'Unbracketed "- ESG" is stripped, cleanly matching registered member Joy AGHEDO.'
+      },
+      {
+        input: 'Adesuwa, ESG',
+        expectedOutcome: 'Matched: Adesuwa',
+        explanation: 'Comma and "ESG" are ignored without breaking single-name matching for Adesuwa.'
+      },
+      {
+        input: 'Edith Aghedo (E.S.G.)',
+        expectedOutcome: 'Matched: Edith Aghedo',
+        explanation: 'Dotted bracketed "(E.S.G.)" is recognized as ESG and ignored.'
       },
       {
         input: 'Mrs Becky Ughede AGL',
         expectedOutcome: 'Matched: Mrs Becky Ughede',
         explanation: 'Both "Mrs" and "AGL" are stripped, leaving "Becky Ughede".'
-      },
-      {
-        input: 'Deaconess Grace',
-        expectedOutcome: 'Matched: Grace',
-        explanation: '"Deaconess" is stripped before directory lookup.'
       }
     ]
   },

@@ -34,11 +34,21 @@ export function normalizePhoneNumber(rawPhone?: string): string {
 /**
  * Normalizes raw name string:
  * 1. Decomposes Unicode diacritics (accents).
- * 2. Normalizes standalone "NK" variants ("N.K.", "N-K", "N K", "nk", "Nk", "NK", "nK") into "NK".
+ * 2. Comprehensively strips "ESG" (whether inside brackets or outside brackets after any name) and ministry group tags.
+ * 3. Normalizes standalone "NK" variants ("N.K.", "N-K", "N K", "nk", "Nk", "NK", "nK") into "NK".
  */
 export function normalizeNameString(str: string): string {
   if (!str) return '';
   let s = str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+  // Strip comprehensive ESG & group tags (in brackets or unbracketed)
+  s = s.replace(/[\(\[\{<]\s*(?:E[\.\-\s]*S[\.\-\s]*G[\.\s]*|Esther(?:\s+(?:Support|Service)?\s*Group)?|P[\.\-\s]*G[\.\s]*|Peace(?:\s+Group)?)(?:\s*[\-\/]?\s*Benin)?(?:\s+Member)?\s*[\)\]\}>]/gi, ' ');
+  s = s.replace(/(?:[\s,;:\-–—/_]+)(?:E[\.\-\s]*S[\.\-\s]*G[\.\s]*|Esther\s+(?:Support\s+|Service\s+)?Group|Peace\s+Group|P[\.\-\s]*G[\.\s]*)(?:\s*[\-\/]?\s*Benin)?(?:\s+Member)?(?=$|[\s,;:\-–—/_\)\]\}>])/gi, ' ');
+  s = s.replace(/\bE[\.\-\s]*S[\.\-\s]*G[\.\s]*/gi, ' ');
+  s = s.replace(/\bEsther\s+(?:Support\s+|Service\s+)?Group(?:\s+Benin)?\b/gi, ' ');
+  s = s.replace(/\bPeace\s+Group(?:\s+Benin)?\b/gi, ' ');
+  s = s.replace(/(?:[\s,;:\-–—/_]+)(?:Benin|Branch|Member)(?=$|[\s,;:\-–—/_\)\]\}>])/gi, ' ');
+
   // Normalize dotted, dashed, or spaced NK occurrences as dedicated token NK
   s = s.replace(/\bN[\.\-\s]?K\b/gi, 'NK');
   return s;
@@ -47,13 +57,15 @@ export function normalizeNameString(str: string): string {
 /**
  * Parses a name that may contain brackets/parentheses into outer name and inside bracket name.
  * E.g. "Mrs J Imasuem(Mrs Juliet Imasuen)" -> outer: "Mrs J Imasuem", inside: "Mrs Juliet Imasuen"
+ * Group tags like (ESG) or (Esther Group) are ignored and not treated as aliases.
  */
 export function parseBracketName(rawName: string): { outer: string; inside: string | null } {
-  const match = rawName.match(/^(.*?)\((.*?)\)(.*)$/);
+  const match = rawName.match(/^(.*?)[\(\[]([^\)\]]+)[\)\]](.*)$/);
   if (match) {
     const outer = `${match[1].trim()} ${match[3].trim()}`.trim();
     const inside = match[2].trim();
-    return { outer, inside: inside.length > 0 ? inside : null };
+    const isGroupTag = /^(?:E[\.\-\s]*S[\.\-\s]*G[\.\s]*|Esther(?:\s+(?:Support|Service)?\s*Group)?|P[\.\-\s]*G[\.\s]*|Peace(?:\s+Group)?)(?:\s*[\-\/]?\s*Benin)?(?:\s+Member)?$/i.test(inside);
+    return { outer, inside: inside.length > 0 && !isGroupTag ? inside : null };
   }
   return { outer: rawName.trim(), inside: null };
 }
