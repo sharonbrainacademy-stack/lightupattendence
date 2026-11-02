@@ -72,6 +72,38 @@ export const OFFICIAL_NAME_MATCHING_RULES: NameMatchingRuleDefinition[] = [
     ]
   },
   {
+    id: 'rule_compact_name',
+    ruleNumber: 2.5,
+    name: 'Compact Username & No-Space Concatenation Match',
+    category: 'Full Name',
+    confidence: 98,
+    badge: '🔗 98% Compact Match',
+    shortDescription: 'Resolves names stored as concatenated usernames or email handles without spaces vs real names pasted with spaces.',
+    detailedLogic: 'Many members are stored in the directory as concatenated handles (e.g. "AghedoVera", "beckyosayande", "Bettybutter", "editharewa", "Joyfashionworld", "georgeumoh129", "jenniferamabock", "osamaidowu44", "silenternest92", "Soniaberry"). When users paste attendee lists with spaces ("Aghedo Vera", "Becky Osayande", "Joy Fashion World", "George Umoh"), this rule normalizes both to compact alphanumeric signatures and matches them seamlessly at 98% confidence.',
+    examples: [
+      {
+        input: 'Aghedo Vera',
+        expectedOutcome: 'Matched: AghedoVera',
+        explanation: 'Space-separated "Aghedo Vera" matches concatenated directory record "AghedoVera".'
+      },
+      {
+        input: 'Becky Osayande',
+        expectedOutcome: 'Matched: beckyosayande',
+        explanation: 'Matches directory handle "beckyosayande" regardless of spaces or casing.'
+      },
+      {
+        input: 'Joy Fashion World',
+        expectedOutcome: 'Matched: Joyfashionworld',
+        explanation: 'Matches 3-word phrase to "Joyfashionworld".'
+      },
+      {
+        input: 'George Umoh',
+        expectedOutcome: 'Matched: georgeumoh129',
+        explanation: 'Trailing numbers "129" are stripped, matching "georgeumoh".'
+      }
+    ]
+  },
+  {
     id: 'rule_word_order',
     ruleNumber: 3,
     name: 'Invariant Word-Order Matching',
@@ -123,12 +155,12 @@ export const OFFICIAL_NAME_MATCHING_RULES: NameMatchingRuleDefinition[] = [
   {
     id: 'rule_key_name',
     ruleNumber: 5,
-    name: 'Strict Single-to-Single & Group-to-Group Resolution ("NK" & Single Names)',
+    name: 'Protected Name Strict Resolution ("NK" & Single Names)',
     category: 'Single Name',
     confidence: 100,
-    badge: '🔑 100% Strict Single Name',
-    shortDescription: 'Permits a single name to match a single name only, and a group of names a group of names only. NK is recognized as a name and always matches NK across all casing formats.',
-    detailedLogic: 'To eliminate false positives, a single name (1 word) strictly matches single-name directory members only and never crosses to multi-word members. Likewise, multi-word group names match only multi-word records. "NK" is officially recognized as a distinct member name and always resolves to NK with 100% precision regardless of casing (UPPERCASE, lowercase, Sentence Case, or tOGGLE cASE).',
+    badge: '🔑 100% Protected Name',
+    shortDescription: 'NK is strictly recognized as a distinct name and always matches member NK across all casing formats without false cross-matching.',
+    detailedLogic: '"NK" is a distinctive member name and always resolves to NK with 100% precision across all casing (NK, nk, Nk, nK, N.K., N K, N-K). NK will never match multi-word names (such as "Sister Nk Peace"). Distinctive single names also match single-name directory members.',
     examples: [
       {
         input: '1. NK',
@@ -154,6 +186,38 @@ export const OFFICIAL_NAME_MATCHING_RULES: NameMatchingRuleDefinition[] = [
         input: '5. Franca',
         expectedOutcome: 'Matched: Sister Franca GL',
         explanation: 'Single name "Franca" resolves to single-name directory member Sister Franca.'
+      }
+    ]
+  },
+  {
+    id: 'rule_first_name_token',
+    ruleNumber: 5.5,
+    name: 'Distinctive First Name & Surname Resolution',
+    category: 'Single Name',
+    confidence: 93,
+    badge: '👤 93% First Name Match',
+    shortDescription: 'Resolves members when they sign in with their distinctive First Name or Surname (e.g. "Sis Juliet", "Sis Joy", "Sis Becky", "Sis Helen", "Sis Bernice", "Bro Stephen").',
+    detailedLogic: 'In prayer meetings, attendees frequently sign in with their courtesy title and First Name only (e.g. "Sis Juliet", "Sis Joy", "Sis Becky", "Sis Helen", "Sis Bernice", "Sis Vivian", "Sis Ruth", "Sis Itohan", "Bro Stephen"). After titles are stripped, this rule accurately identifies and matches the corresponding registered member who bears that primary name (e.g. Juliet Johnson, Joy Aghedo, Becky Ughede, Stephen Moses) at 93% confidence.',
+    examples: [
+      {
+        input: 'Sis Juliet',
+        expectedOutcome: 'Matched: Juliet Johnson',
+        explanation: '"Sis" is stripped, and distinctive first name "Juliet" matches Juliet Johnson.'
+      },
+      {
+        input: 'Sis Joy',
+        expectedOutcome: 'Matched: Joy AGHEDO',
+        explanation: 'Matches registered directory member Joy AGHEDO.'
+      },
+      {
+        input: 'Sis Becky',
+        expectedOutcome: 'Matched: Mrs Becky Ughede',
+        explanation: 'Matches Mrs Becky Ughede with 93% confidence.'
+      },
+      {
+        input: 'Bro Stephen',
+        expectedOutcome: 'Matched: Stephen Moses',
+        explanation: 'Matches member Stephen Moses.'
       }
     ]
   },

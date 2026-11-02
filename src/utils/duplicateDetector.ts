@@ -1,4 +1,5 @@
 import { Beneficiary, AttendanceSession, AttendanceRecordItem, AirtimeRecord } from '../types';
+import { stripHiddenWhitespace } from './attendanceMatcher';
 
 /**
  * Common ministry and courtesy title prefixes.
@@ -19,7 +20,7 @@ export const TITLE_PREFIXES = new Set([
 export function normalizePhoneNumber(rawPhone?: string): string {
   if (!rawPhone) return '';
   // Strip everything except digits
-  let digits = rawPhone.replace(/\D/g, '');
+  let digits = stripHiddenWhitespace(rawPhone).replace(/\D/g, '');
   if (digits.startsWith('234') && digits.length >= 13) {
     digits = digits.slice(3);
   } else if (digits.startsWith('234') && digits.length === 13) {
@@ -33,13 +34,15 @@ export function normalizePhoneNumber(rawPhone?: string): string {
 
 /**
  * Normalizes raw name string:
- * 1. Decomposes Unicode diacritics (accents).
- * 2. Comprehensively strips "ESG" (whether inside brackets or outside brackets after any name) and ministry group tags.
- * 3. Normalizes standalone "NK" variants ("N.K.", "N-K", "N K", "nk", "Nk", "NK", "nK") into "NK".
+ * 1. Strips hidden whitespace, zero-width characters, and non-breaking spaces.
+ * 2. Decomposes Unicode diacritics (accents).
+ * 3. Comprehensively strips "ESG" (whether inside brackets or outside brackets after any name) and ministry group tags.
+ * 4. Normalizes standalone "NK" variants ("N.K.", "N-K", "N K", "nk", "Nk", "NK", "nK") into "NK".
  */
 export function normalizeNameString(str: string): string {
   if (!str) return '';
-  let s = str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const cleaned = stripHiddenWhitespace(str);
+  let s = cleaned.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
   // Strip comprehensive ESG & group tags (in brackets or unbracketed)
   s = s.replace(/[\(\[\{<]\s*(?:E[\.\-\s]*S[\.\-\s]*G[\.\s]*|Esther(?:\s+(?:Support|Service)?\s*Group)?|P[\.\-\s]*G[\.\s]*|Peace(?:\s+Group)?)(?:\s*[\-\/]?\s*Benin)?(?:\s+Member)?\s*[\)\]\}>]/gi, ' ');

@@ -3,7 +3,7 @@ import { Calendar, UserCheck, UserX, Clock, CheckCircle2, Search, Filter, Sparkl
 import { jsPDF } from 'jspdf';
 import { Beneficiary, AttendanceSession, AttendanceRecordItem, AttendanceStatus, UserRole, MinistryGroup } from '../types';
 import { findDuplicateAttendanceSessions, findDuplicateBeneficiaries } from '../utils/duplicateDetector';
-import { processAttendanceText, AttendanceAutoMatchResult, cleanPastedLine, getSimilarity } from '../utils/attendanceMatcher';
+import { processAttendanceText, AttendanceAutoMatchResult, cleanPastedLine, getSimilarity, normalizeAttendanceString, stripHiddenWhitespace } from '../utils/attendanceMatcher';
 import { AttendanceRulesModal } from './AttendanceRulesModal';
 import { NameMatchingRulesModal } from './NameMatchingRulesModal';
 import { DuplicateRecordsModal } from './DuplicateRecordsModal';
@@ -860,8 +860,9 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
       let absentCount = 0;
       const attendedDates: string[] = [];
 
+      const memNameNorm = normalizeAttendanceString(member.fullName);
       effectiveSessions.forEach(session => {
-        const rec = session.records.find(r => r.beneficiaryId === member.id || r.fullName.toLowerCase().trim() === member.fullName.toLowerCase().trim());
+        const rec = session.records.find(r => r.beneficiaryId === member.id || normalizeAttendanceString(r.fullName) === memNameNorm);
         if (rec) {
           if (rec.status === 'Present' || rec.status === 'Late') {
             presentCount++;
@@ -1094,8 +1095,9 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
       let presentCount = 0;
       let absentCount = 0;
 
+      const memNameNorm = normalizeAttendanceString(member.fullName);
       effectiveSessions.forEach(session => {
-        const rec = session.records.find(r => r.beneficiaryId === member.id || r.fullName.toLowerCase().trim() === member.fullName.toLowerCase().trim());
+        const rec = session.records.find(r => r.beneficiaryId === member.id || normalizeAttendanceString(r.fullName) === memNameNorm);
         if (rec) {
           if (rec.status === 'Present' || rec.status === 'Late') presentCount++;
           else if (rec.status === 'Absent') absentCount++;
@@ -1176,10 +1178,10 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
         const mapFromSession: Record<string, AttendanceRecordItem> = {};
         (beneficiaries || []).forEach(b => {
           if (!b || !b.id) return;
-          const bName = (b.fullName || '').toLowerCase();
+          const bNameNorm = normalizeAttendanceString(b.fullName || '');
           const existingRecord = (existingToday.records || []).find(r => 
             (r.beneficiaryId && r.beneficiaryId === b.id) || 
-            (r.fullName && r.fullName.toLowerCase() === bName)
+            (r.fullName && normalizeAttendanceString(r.fullName) === bNameNorm)
           );
           if (existingRecord) {
             mapFromSession[b.id] = existingRecord;
@@ -1228,10 +1230,10 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
       const mapFromSession: Record<string, AttendanceRecordItem> = {};
       (beneficiaries || []).forEach(b => {
         if (!b || !b.id) return;
-        const bName = (b.fullName || '').toLowerCase();
+        const bNameNorm = normalizeAttendanceString(b.fullName || '');
         const existingRecord = (targetSession.records || []).find(r => 
           (r.beneficiaryId && r.beneficiaryId === b.id) || 
-          (r.fullName && r.fullName.toLowerCase() === bName)
+          (r.fullName && normalizeAttendanceString(r.fullName) === bNameNorm)
         );
         if (existingRecord) {
           mapFromSession[b.id] = existingRecord;
@@ -1423,17 +1425,23 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
   const filteredBeneficiaries = useMemo(() => {
     const list = (beneficiaries || []).filter(b => {
       if (!b) return false;
-      const bName = (b.fullName || '').toLowerCase();
-      const bPhone = b.phoneNumber || '';
+      const bNameNorm = normalizeAttendanceString(b.fullName || '');
+      const bPhone = (b.phoneNumber || '').replace(/\D/g, '');
       const bCat = b.category || 'Other';
-      const searchLower = (searchQuery || '').toLowerCase();
+      const searchNorm = normalizeAttendanceString(searchQuery);
 
-      const matchesSearch = !searchLower || bName.includes(searchLower) || bPhone.includes(searchLower);
+      const matchesSearch = !searchNorm
+        || bNameNorm.includes(searchNorm)
+        || bPhone.includes(searchNorm)
+        || Boolean(b.zoomName && normalizeAttendanceString(b.zoomName).includes(searchNorm))
+        || Boolean(b.whatsappName && normalizeAttendanceString(b.whatsappName).includes(searchNorm))
+        || Boolean(Array.isArray(b.aliases) && b.aliases.some(a => normalizeAttendanceString(a).includes(searchNorm)));
+
       let matchesCategory = false;
       if (categoryFilter === 'ALL') {
         matchesCategory = true;
       } else if (categoryFilter === 'Esther Group Benin') {
-        matchesCategory = bCat === 'Esther Group Benin' || Boolean(b.notes && b.notes.toLowerCase().includes('esther'));
+        matchesCategory = bCat === 'Esther Group Benin' || bCat === 'Esther Group' || Boolean(b.notes && b.notes.toLowerCase().includes('esther')) || (!bCat.toLowerCase().includes('peace') && !b.notes?.toLowerCase().includes('peace'));
       } else if (categoryFilter === 'Peace Group') {
         matchesCategory = bCat === 'Peace Group' || Boolean(b.notes && b.notes.toLowerCase().includes('peace'));
       } else {

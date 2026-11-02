@@ -1,12 +1,67 @@
 import { Beneficiary } from '../types';
 
 /**
+ * Strips all hidden whitespace, non-breaking spaces (NBSP), zero-width characters,
+ * byte order marks (BOM), directional formatting controls, and unprintable characters.
+ * Replaces all Unicode whitespace variants with standard ASCII space and trims.
+ */
+export function stripHiddenWhitespace(raw: string): string {
+  if (!raw) return '';
+
+  let s = String(raw);
+
+  // 1. Strip Zero-Width characters and BOMs:
+  // \u200B (Zero-width space), \u200C (ZWNJ), \u200D (ZWJ), \uFEFF (BOM / ZWNBSP), \u2060 (Word joiner), \u00AD (Soft hyphen)
+  s = s.replace(/[\u200B\u200C\u200D\uFEFF\u2060\u00AD]/g, '');
+
+  // 2. Strip Bidirectional marks and formatting isolates:
+  // \u200E (LRM), \u200F (RLM), \u202A-\u202E (embedding/override controls), \u2066-\u2069 (directional isolates)
+  s = s.replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '');
+
+  // 3. Map all Unicode whitespace variants to standard ASCII space:
+  // \u00A0 (Non-breaking space / NBSP), \u1680 (Ogham space), \u2000-\u200A (En/Em/Thin/Hair/Quad spaces),
+  // \u2028 (Line separator), \u2029 (Paragraph separator), \u202F (Narrow NBSP), \u205F (Math space), \u3000 (Ideographic space)
+  s = s.replace(/[\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\t\v\f]/g, ' ');
+
+  // 4. Map smart/curly quotes & apostrophes to standard single and double ASCII quotes:
+  s = s.replace(/[\u2018\u2019\u201A\u201B\u0060\u00B4\u2032\u2035]/g, "'");
+  s = s.replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"');
+
+  // 5. Map Unicode dashes, hyphens, and minus signs to standard ASCII hyphen:
+  s = s.replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]/g, '-');
+
+  // 6. Strip unprintable control characters (excluding newline \r \n which are handled in line splitters):
+  s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+
+  // 7. Collapse redundant spaces and trim
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Robust string normalization for attendance records:
+ * - Strips hidden whitespace, zero-width chars, and non-breaking spaces
+ * - Normalizes Unicode diacritics (accents)
+ * - Collapses repeated whitespace into single ASCII space
+ * - Trims and converts to lowercase for case-insensitive matching
+ */
+export function normalizeAttendanceString(raw: string): string {
+  if (!raw) return '';
+  const cleaned = stripHiddenWhitespace(raw);
+  return cleaned
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+/**
  * Normalizes any phone number format (international +234, local 0..., dashes, spaces)
  * to standard Nigerian 11 digits format e.g. "08039463823"
  */
 export function normalizePhone(ph: string): string {
   if (!ph) return '';
-  const digits = ph.replace(/[^0-9]/g, '');
+  const digits = stripHiddenWhitespace(ph).replace(/[^0-9]/g, '');
   if (digits.startsWith('234') && digits.length >= 12) {
     return '0' + digits.slice(3);
   }
@@ -24,7 +79,10 @@ export interface CleanedLineResult {
  * device names, titles, and extra symbols.
  */
 export function cleanPastedLine(rawLine: string): CleanedLineResult {
-  let line = (rawLine || '').trim();
+  if (!rawLine) return { cleanText: '', extractedPhone: '', rawLine: '' };
+
+  // Strip hidden whitespace, zero-width characters, and non-breaking spaces first
+  let line = stripHiddenWhitespace(rawLine);
   if (!line) return { cleanText: '', extractedPhone: '', rawLine: '' };
 
   // Normalize Unicode diacritics
@@ -102,18 +160,79 @@ export function cleanPastedLine(rawLine: string): CleanedLineResult {
 }
 
 /**
- * Calculates Levenshtein string similarity score between 0.0 and 1.0
+ * Calculates Jaro distance between two strings (0.0 to 1.0)
  */
-export function getSimilarity(s1: string, s2: string): number {
+export function getJaroDistance(s1: string, s2: string): number {
   if (!s1 || !s2) return 0;
   if (s1 === s2) return 1.0;
   const l1 = s1.length;
   const l2 = s2.length;
-  if (s1.includes(s2) || s2.includes(s1)) {
-    const minLen = Math.min(l1, l2);
-    const maxLen = Math.max(l1, l2);
-    if (minLen >= 3) return minLen / maxLen;
+  if (l1 === 0 || l2 === 0) return 0.0;
+
+  const matchDistance = Math.floor(Math.max(l1, l2) / 2) - 1;
+  const s1Matches = new Array(l1).fill(false);
+  const s2Matches = new Array(l2).fill(false);
+
+  let matches = 0;
+  for (let i = 0; i < l1; i++) {
+    const start = Math.max(0, i - matchDistance);
+    const end = Math.min(i + matchDistance + 1, l2);
+    for (let j = start; j < end; j++) {
+      if (!s2Matches[j] && s1[i] === s2[j]) {
+        s1Matches[i] = true;
+        s2Matches[j] = true;
+        matches++;
+        break;
+      }
+    }
   }
+
+  if (matches === 0) return 0.0;
+
+  let transpositions = 0;
+  let k = 0;
+  for (let i = 0; i < l1; i++) {
+    if (s1Matches[i]) {
+      while (!s2Matches[k]) k++;
+      if (s1[i] !== s2[k]) transpositions++;
+      k++;
+    }
+  }
+
+  return (
+    (matches / l1 + matches / l2 + (matches - transpositions / 2) / matches) / 3.0
+  );
+}
+
+/**
+ * Calculates Jaro-Winkler similarity (0.0 to 1.0), applying a prefix bonus
+ * for names sharing initial characters (ideal for human names and typos).
+ */
+export function getJaroWinklerSimilarity(s1: string, s2: string): number {
+  const jaro = getJaroDistance(s1, s2);
+  if (jaro < 0.65) return jaro;
+
+  let prefix = 0;
+  const maxPrefix = Math.min(4, Math.min(s1.length, s2.length));
+  for (let i = 0; i < maxPrefix; i++) {
+    if (s1[i] === s2[i]) prefix++;
+    else break;
+  }
+
+  return jaro + prefix * 0.1 * (1.0 - jaro);
+}
+
+/**
+ * Calculates Levenshtein string similarity score between 0.0 and 1.0
+ */
+export function getLevenshteinSimilarity(s1: string, s2: string): number {
+  if (!s1 || !s2) return 0;
+  if (s1 === s2) return 1.0;
+  const l1 = s1.length;
+  const l2 = s2.length;
+  const maxLen = Math.max(l1, l2);
+  if (maxLen === 0) return 1.0;
+
   const matrix: number[][] = Array(l2 + 1).fill(null).map(() => Array(l1 + 1).fill(0));
   for (let i = 0; i <= l1; i++) matrix[0][i] = i;
   for (let j = 0; j <= l2; j++) matrix[j][0] = j;
@@ -129,24 +248,88 @@ export function getSimilarity(s1: string, s2: string): number {
     }
   }
   const distance = matrix[l2][l1];
-  const maxLen = Math.max(l1, l2);
-  return maxLen === 0 ? 1 : (maxLen - distance) / maxLen;
+  return (maxLen - distance) / maxLen;
+}
+
+/**
+ * Combined Best Similarity: takes the maximum score between Jaro-Winkler and Levenshtein.
+ * Highly robust against transpositions, prefixes, suffix omissions, and phonetic typos.
+ */
+export function getSimilarity(s1: string, s2: string): number {
+  if (!s1 || !s2) return 0;
+  if (s1 === s2) return 1.0;
+  const jw = getJaroWinklerSimilarity(s1, s2);
+  const lev = getLevenshteinSimilarity(s1, s2);
+  return Math.max(jw, lev);
+}
+
+/**
+ * Evaluates whether two single tokens match under fuzzy similarity criteria
+ * Handles:
+ * - Exact match
+ * - Prefix containment for tokens with length >= 4 (e.g. "julie" and "juliet")
+ * - Typo tolerance via Jaro-Winkler / Levenshtein similarity >= threshold
+ */
+export function isFuzzyTokenMatch(
+  tokenA: string,
+  tokenB: string,
+  threshold: number = 0.80
+): boolean {
+  if (!tokenA || !tokenB) return false;
+  if (tokenA === tokenB) return true;
+
+  // Protect very short tokens like "nk" or initials from false fuzzy matches
+  if (tokenA.length <= 2 || tokenB.length <= 2) {
+    return tokenA === tokenB;
+  }
+
+  // Prefix match for tokens with length >= 4 (e.g. "julie" vs "juliet")
+  if (tokenA.length >= 4 && tokenB.length >= 4) {
+    if (tokenA.startsWith(tokenB) || tokenB.startsWith(tokenA)) {
+      return true;
+    }
+  }
+
+  const sim = getSimilarity(tokenA, tokenB);
+  if (sim >= threshold) return true;
+
+  // Edit distance check for words of length 4+
+  const maxLen = Math.max(tokenA.length, tokenB.length);
+  if (maxLen >= 4) {
+    const editDist = Math.round((1 - getLevenshteinSimilarity(tokenA, tokenB)) * maxLen);
+    if (maxLen <= 6 && editDist <= 1) return true;
+    if (maxLen >= 7 && editDist <= 2) return true;
+  }
+
+  return false;
 }
 
 export interface BeneficiaryIndexItem {
   beneficiary: Beneficiary;
   nameVariants: string[];
   variantTokenSets: string[][];
+  compactSignatures: string[];
   phone: string;
   shortPhone: string;
 }
 
 /**
- * Indexes beneficiaries with all potential name variations (bracket aliases, Zoom names, WhatsApp display names, titles)
+ * Splits camelCase or PascalCase names into spaced words
+ * e.g. "AghedoVera" -> ["aghedo", "vera"]
+ */
+export function splitConcatenatedName(str: string): string[] {
+  if (!str) return [];
+  const camel = str.replace(/([a-z])([A-Z])/g, '$1 $2');
+  return camel.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').trim().split(/\s+/).filter(Boolean);
+}
+
+/**
+ * Indexes beneficiaries with all potential name variations (bracket aliases, Zoom names, WhatsApp display names, titles, compact forms)
  */
 export function buildBeneficiaryIndex(beneficiaries: Beneficiary[]): BeneficiaryIndexItem[] {
   return (beneficiaries || []).map(b => {
-    const bName = b?.fullName || '';
+    const rawFullName = stripHiddenWhitespace(b?.fullName || '').trim();
+    const bName = rawFullName;
     const bPhone = normalizePhone(b?.phoneNumber || '');
     const bShortPhone = bPhone.length >= 7 ? bPhone.slice(-7) : bPhone;
 
@@ -155,38 +338,55 @@ export function buildBeneficiaryIndex(beneficiaries: Beneficiary[]): Beneficiary
     const insideAliases: string[] = [];
     const bracketMatches = Array.from(bName.matchAll(/[\(\[]([^\)\]]+)[\)\]]/g));
     bracketMatches.forEach(m => {
-      const insideText = (m[1] || '').trim();
+      const insideText = stripHiddenWhitespace(m[1] || '').trim();
       const isGroupTag = /^(?:E[\.\-\s]*S[\.\-\s]*G[\.\s]*|Esther(?:\s+(?:Support|Service)?\s*Group)?|P[\.\-\s]*G[\.\s]*|Peace(?:\s+Group)?)(?:\s*[\-\/]?\s*Benin)?(?:\s+Member)?$/i.test(insideText);
       if (insideText && !isGroupTag) {
         insideAliases.push(insideText);
       }
     });
-    const outsideName = bName.replace(/[\(\[][^\)\]]*[\)\]]/g, ' ').trim();
+    const outsideName = stripHiddenWhitespace(bName.replace(/[\(\[][^\)\]]*[\)\]]/g, ' ')).trim();
 
     const nameVariants: string[] = [];
     const addVariant = (raw: string) => {
       if (!raw) return;
-      const cleaned = cleanPastedLine(raw).cleanText;
+      const stripped = stripHiddenWhitespace(raw);
+      const cleaned = cleanPastedLine(stripped).cleanText;
       if (cleaned && !nameVariants.includes(cleaned)) {
         nameVariants.push(cleaned);
+      }
+      // Also add version with trailing numbers stripped (e.g. "georgeumoh129" -> "georgeumoh", "fehioriemen5" -> "fehioriemen")
+      const noDigits = cleaned.replace(/\d+/g, '').trim();
+      if (noDigits && noDigits !== cleaned && !nameVariants.includes(noDigits)) {
+        nameVariants.push(noDigits);
       }
     };
 
     if (outsideName) addVariant(outsideName);
     insideAliases.forEach(a => addVariant(a));
     addVariant(bName);
-    if (b.zoomName) addVariant(b.zoomName);
-    if (b.whatsappName) addVariant(b.whatsappName);
-    if (Array.isArray(b.aliases)) {
+    if (b?.zoomName) addVariant(b.zoomName);
+    if (b?.whatsappName) addVariant(b.whatsappName);
+    if (Array.isArray(b?.aliases)) {
       b.aliases.forEach(a => addVariant(a));
     }
 
-    const variantTokenSets = nameVariants.map(v => v.split(' ').filter(t => t.length >= 2 || t === 'nk'));
+    // Split camel case words if any (e.g. "AghedoVera" -> "aghedo vera", "Joyfashionworld" -> "joy fashion world")
+    const camelSplit = splitConcatenatedName(bName).join(' ');
+    if (camelSplit && camelSplit !== bName.toLowerCase()) {
+      addVariant(camelSplit);
+    }
+
+    // Keep all tokens of length >= 1 so initials like "J" in "J Imasuem" are not discarded
+    const variantTokenSets = nameVariants.map(v => v.split(' ').filter(t => t.length >= 1));
+
+    // Compact alpha signature without spaces/numbers (e.g. "beckyughede", "aghedovera", "georgeumoh")
+    const compactSignatures = nameVariants.map(v => v.replace(/[^a-z0-9]/g, ''));
 
     return {
       beneficiary: b,
       nameVariants,
       variantTokenSets,
+      compactSignatures,
       phone: bPhone,
       shortPhone: bShortPhone
     };
@@ -206,8 +406,9 @@ export interface LineMatchResult {
  * Rules strictly enforce:
  * 1. Single name matches a single name only.
  * 2. Group of names matches a group of names only.
- * 3. "NK" is recognized as a name and always matches to "NK".
+ * 3. "NK" is recognized as a distinctive name and always matches to "NK".
  * 4. Matching is case-insensitive (UPPERCASE, lowercase, Sentence Case, tOGGLE cASE).
+ * 5. Uses fuzzy similarity thresholds rather than rigid strict equality to tolerate typos.
  */
 export function matchLineToBeneficiary(
   rawLine: string,
@@ -243,12 +444,14 @@ export function matchLineToBeneficiary(
     };
   }
 
-  const lineTokens = cleanText.split(' ').filter(t => t.length >= 2 || t === 'nk');
+  const lineTokens = cleanText.split(' ').filter(t => t.length >= 1);
   const isInputSingleName = (lineTokens.length === 1);
   const isInputGroupOfNames = (lineTokens.length >= 2);
+  const lineCompact = cleanText.replace(/[^a-z0-9]/g, '');
 
   // Priority: "NK" is a distinctive single name and must always match to "NK"
-  // Handles any casing: NK, nk, Nk, nK, N.K., N.K, N K, N-K
+  // Strictly matches only member NK across any casing (NK, nk, Nk, nK, N.K., N K, N-K)
+  // NK must never match multi-word names like "Sister Nk Peace"
   if (cleanText === 'nk' || (isInputSingleName && lineTokens[0] === 'nk')) {
     const nkMatch = index.find(bObj => 
       bObj.nameVariants.some(v => v === 'nk') || 
@@ -277,49 +480,76 @@ export function matchLineToBeneficiary(
     let currentRuleId = 'rule_none';
     let currentRuleName = 'Unmatched';
 
-    // A. Exact Name Match with any variant - Rule 2 (Strict Partitioning)
-    for (let vIdx = 0; vIdx < bObj.nameVariants.length; vIdx++) {
-      const variant = bObj.nameVariants[vIdx];
-      const targetTokens = bObj.variantTokenSets[vIdx] || [];
-      const isTargetSingleName = (targetTokens.length === 1);
-      const isTargetGroupOfNames = (targetTokens.length >= 2);
-
-      // Single name matches single name only; group of names matches group of names only
-      if (isInputSingleName && !isTargetSingleName) continue;
-      if (isInputGroupOfNames && !isTargetGroupOfNames) continue;
-
+    // A. Full Name & Inside-Bracket Alias Match (Exact 99%, or Similarity Threshold >= 0.88 -> 95%)
+    for (const variant of bObj.nameVariants) {
       if (cleanText === variant) {
         score = 99;
         reason = `Exact name match "${variant}"`;
         currentRuleId = 'rule_exact_name';
         currentRuleName = 'Rule 2: Full Name & Alias Match';
         break;
+      } else if (cleanText.length >= 5 && variant.length >= 5) {
+        const sim = getSimilarity(cleanText, variant);
+        if (sim >= 0.88) {
+          const simScore = Math.round(sim * 97);
+          if (simScore > score) {
+            score = simScore;
+            reason = `High similarity name match (${Math.round(sim * 100)}%) with "${variant}"`;
+            currentRuleId = 'rule_exact_name';
+            currentRuleName = 'Rule 2: Full Name Fuzzy Match';
+          }
+        }
       }
     }
 
-    // B. Token Subset / Set Matching (Word-order independent) - Rules 3, 4, 5
+    // B. Compact / No-Space Normalized Match - Rule 2B (98% exact, >= 0.86 fuzzy)
+    // Handles directory names stored without spaces vs pasted real names with spaces
+    // e.g. "Aghedo Vera" vs "AghedoVera", "Joy Fashion World" vs "Joyfashionworld", "George Umoh" vs "georgeumoh129"
+    if (score < 98 && lineCompact.length >= 4) {
+      for (const sig of bObj.compactSignatures) {
+        if (!sig || sig.length < 4) continue;
+        if (lineCompact === sig) {
+          score = 98;
+          reason = `Compact name match "${sig}"`;
+          currentRuleId = 'rule_compact_name';
+          currentRuleName = 'Rule 2B: Compact Username & No-Space Match';
+          break;
+        }
+        // Reversed tokens compact (e.g. "Vera Aghedo" -> "veraaghedo" vs "aghedovera")
+        if (isInputGroupOfNames) {
+          const revCompact = [...lineTokens].reverse().join('').replace(/[^a-z0-9]/g, '');
+          if (revCompact === sig) {
+            score = 97;
+            reason = `Reversed compact name match "${sig}"`;
+            currentRuleId = 'rule_compact_name';
+            currentRuleName = 'Rule 2B: Compact Username & No-Space Match';
+            break;
+          }
+        }
+        // Compact fuzzy similarity threshold
+        const compSim = getSimilarity(lineCompact, sig);
+        if (compSim >= 0.86) {
+          const compScore = Math.round(compSim * 95);
+          if (compScore > score) {
+            score = compScore;
+            reason = `Fuzzy compact name match (${Math.round(compSim * 100)}%) with "${sig}"`;
+            currentRuleId = 'rule_compact_name';
+            currentRuleName = 'Rule 2B: Compact Username & No-Space Match';
+          }
+        }
+      }
+    }
+
+    // C. Token Matching (Word-order independent, subset, and single distinctive name) - Rules 3, 4, 5, 5B
     if (score < 90 && lineTokens.length >= 1) {
       for (const targetTokens of bObj.variantTokenSets) {
         if (targetTokens.length === 0) continue;
 
-        const isTargetSingleName = (targetTokens.length === 1);
-        const isTargetGroupOfNames = (targetTokens.length >= 2);
-
-        // Strict Partitioning:
-        // A single name matches a single name only; a group of names matches a group of names only.
-        if (isInputSingleName && !isTargetSingleName) continue;
-        if (isInputGroupOfNames && !isTargetGroupOfNames) continue;
-
         // CASE 1: Group of Names vs Group of Names (2+ tokens)
-        if (isInputGroupOfNames && isTargetGroupOfNames) {
-          // Count matched tokens
+        if (isInputGroupOfNames && targetTokens.length >= 2) {
           let matchCount = 0;
           for (const tt of targetTokens) {
-            const hasMatch = lineTokens.some(lt => 
-              lt === tt || 
-              (lt.length >= 4 && tt.length >= 4 && (lt.startsWith(tt) || tt.startsWith(lt))) ||
-              getSimilarity(lt, tt) >= 0.85
-            );
+            const hasMatch = lineTokens.some(lt => isFuzzyTokenMatch(lt, tt, 0.78));
             if (hasMatch) matchCount++;
           }
 
@@ -350,7 +580,7 @@ export function matchLineToBeneficiary(
           }
         } 
         // CASE 2: Single Name vs Single Name (1 token only)
-        else if (isInputSingleName && isTargetSingleName) {
+        else if (isInputSingleName && targetTokens.length === 1) {
           const lt = lineTokens[0];
           const tt = targetTokens[0];
           if (lt === tt) {
@@ -362,39 +592,64 @@ export function matchLineToBeneficiary(
               currentRuleId = isNK ? 'rule_nk_name' : 'rule_key_name';
               currentRuleName = isNK ? 'Rule: Direct NK Name Match' : 'Rule 5: Single Name to Single Name Match';
             }
-          } else if (lt.length >= 4 && tt.length >= 4 && (lt.startsWith(tt) || tt.startsWith(lt))) {
-            const currentScore = 88;
-            if (currentScore > score) {
-              score = currentScore;
-              reason = `Single name prefix match "${tt}"`;
-              currentRuleId = 'rule_key_name';
-              currentRuleName = 'Rule 5: Single Name to Single Name Match';
+          } else if (lt !== 'nk' && tt !== 'nk') {
+            // Fuzzy similarity threshold for single name
+            if (isFuzzyTokenMatch(lt, tt, 0.78)) {
+              const sim = getSimilarity(lt, tt);
+              const currentScore = Math.round(sim * 90);
+              if (currentScore > score) {
+                score = currentScore;
+                reason = `Single name fuzzy match (${Math.round(sim * 100)}%) "${tt}"`;
+                currentRuleId = 'rule_fuzzy';
+                currentRuleName = 'Rule 8: Fuzzy Typo Tolerance Match';
+              }
             }
-          } else if (lt.length >= 3 && tt.length >= 3 && getSimilarity(lt, tt) >= 0.85) {
-            const currentScore = 82;
-            if (currentScore > score) {
-              score = currentScore;
-              reason = `Single name fuzzy match "${tt}"`;
-              currentRuleId = 'rule_fuzzy';
-              currentRuleName = 'Rule 8: Fuzzy Typo Tolerance Match';
+          }
+        }
+        // CASE 3: Single Distinctive Name vs Multi-Word Group Name (Rule 5B / 5C)
+        // Solves the fault where members signing in as "Sis Juliet", "Sis Joy", "Sis Becky", "Sis Helen", "Sis Bernice",
+        // "Sis Vivian", "Sis Ruth", "Sis Itohan", "Bro Stephen" were skipped because directory has both First & Last name!
+        // Uses fuzzy similarity threshold to handle spelling variants (e.g. "Sis Julie", "Sis Beckyy", "Bro Stefan")
+        // Protected: "NK" never matches multi-word names!
+        else if (isInputSingleName && targetTokens.length >= 2) {
+          const lt = lineTokens[0];
+          if (lt.length >= 3 && lt !== 'nk' && !/^\d+$/.test(lt)) {
+            const firstToken = targetTokens[0];
+            // Check primary First Name match with similarity threshold
+            if (isFuzzyTokenMatch(lt, firstToken, 0.80)) {
+              const sim = lt === firstToken ? 1.0 : getSimilarity(lt, firstToken);
+              const currentScore = Math.round(93 * sim);
+              if (currentScore > score) {
+                score = currentScore;
+                reason = `Distinctive First Name match ("${lt}" in ${targetTokens.join(' ')})`;
+                currentRuleId = 'rule_first_name_token';
+                currentRuleName = 'Rule 5B: Distinctive First Name Match';
+              }
+            } else {
+              // Check Surname / other name match with similarity threshold
+              for (let i = 1; i < targetTokens.length; i++) {
+                const surnameToken = targetTokens[i];
+                if (isFuzzyTokenMatch(lt, surnameToken, 0.80)) {
+                  const sim = lt === surnameToken ? 1.0 : getSimilarity(lt, surnameToken);
+                  const currentScore = Math.round(91 * sim);
+                  if (currentScore > score) {
+                    score = currentScore;
+                    reason = `Distinctive Surname / Name match ("${lt}" in ${targetTokens.join(' ')})`;
+                    currentRuleId = 'rule_name_token';
+                    currentRuleName = 'Rule 5C: Distinctive Surname / Token Match';
+                    break;
+                  }
+                }
+              }
             }
           }
         }
       }
     }
 
-    // C. Whole String Fuzzy Similarity (handles single letter typos e.g. Imasuen/Imasuem) - Rule 8 (Strict Partitioning)
+    // D. Whole String Fuzzy Similarity (handles single letter typos e.g. Imasuen/Imasuem) - Rule 8
     if (score < 80) {
-      for (let vIdx = 0; vIdx < bObj.nameVariants.length; vIdx++) {
-        const variant = bObj.nameVariants[vIdx];
-        const targetTokens = bObj.variantTokenSets[vIdx] || [];
-        const isTargetSingleName = (targetTokens.length === 1);
-        const isTargetGroupOfNames = (targetTokens.length >= 2);
-
-        // Strict Partitioning: never fuzzy match single to group or group to single
-        if (isInputSingleName && !isTargetSingleName) continue;
-        if (isInputGroupOfNames && !isTargetGroupOfNames) continue;
-
+      for (const variant of bObj.nameVariants) {
         // Skip fuzzy comparisons for short strings (length <= 2) like 'nk' to avoid false matches
         if (cleanText.length <= 2 || variant.length <= 2) {
           if (cleanText === variant) {
@@ -406,7 +661,7 @@ export function matchLineToBeneficiary(
         }
 
         const sim = getSimilarity(cleanText, variant);
-        if (sim >= 0.82) {
+        if (sim >= 0.80) {
           const currentScore = Math.round(sim * 90);
           if (currentScore > score) {
             score = currentScore;
@@ -476,10 +731,11 @@ export function splitAttendanceLines(rawText: string): string[] {
   if (!rawText || !rawText.trim()) return [];
 
   const rawLines: string[] = [];
-  const textLines = rawText.split(/[\r\n]+/);
+  const cleanedText = stripHiddenWhitespace(rawText);
+  const textLines = cleanedText.split(/[\r\n\u2028\u2029]+/);
 
   textLines.forEach(line => {
-    const trimmed = line.trim();
+    const trimmed = stripHiddenWhitespace(line).trim();
     if (!trimmed) return;
 
     // Handle spreadsheet tab-delimited rows e.g. "1\tJoy Aghedo\t08039463823"
@@ -494,8 +750,8 @@ export function splitAttendanceLines(rawText: string): string[] {
       }
     }
 
-    // Handle multi-numbered items on a single line e.g. "1. Sis Mary 2. Bro John 3. Grace"
-    const subItems = trimmed.split(/(?=\b\d{1,2}[\.\)\-]\s+[A-Za-z])/);
+    // Handle multi-numbered items on a single line e.g. "1. Sis Mary 2. Bro John 3. Grace" or "1. Joy 2. [5:30] Helen"
+    const subItems = trimmed.split(/(?=\b\d{1,2}[\.\)\-]\s+\S)/);
     if (subItems.length > 1) {
       subItems.forEach(item => {
         const itemTrimmed = item.trim();
