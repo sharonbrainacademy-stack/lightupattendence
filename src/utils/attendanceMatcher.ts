@@ -88,6 +88,9 @@ export function cleanPastedLine(rawLine: string): CleanedLineResult {
   // Normalize Unicode diacritics
   line = line.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
+  // Split CamelCase words before lowercasing (e.g. "AghedoVera" -> "Aghedo Vera")
+  line = line.replace(/([a-z])([A-Z])/g, '$1 $2');
+
   // 1. Strip list numbering, bullets, emojis, checkboxes, hashes AT THE VERY START
   // E.g. "1.", "1 -", "1)", "1:", "•", "-", "*", "#1.", "No. 1:", "No 1 -"
   line = line.replace(/^(?:No\.?\s*\d+|\d+|[•\-\*\+\~\✓\>#])[\.\)\-\:\s]+/gi, '');
@@ -122,15 +125,16 @@ export function cleanPastedLine(rawLine: string): CleanedLineResult {
   line = line.replace(/\s*\((?:Host|Co-host|Host & Co-host|Me|Guest|Participant)\)/gi, ' ');
   line = line.replace(/\b(?:Host|Co-host|Host & Co-host|Guest|Participant)\b/gi, ' ');
 
-  // 6. Comprehensive ESG & Ministry Group stripping (both inside brackets AND outside brackets)
+  // 6. Comprehensive ESG, PG & Ministry Group stripping (both inside brackets AND outside brackets)
   // Inside brackets/parentheses/curlies/angles: e.g. (ESG), [ESG], {ESG}, <ESG>, (E.S.G.), (E. S. G.), (esg), (ESG Benin), (ESG-Benin), (ESG Member), (Esther Group), (Esther Group Benin), (PG), [PG], (Peace Group)
   line = line.replace(/[\(\[\{<]\s*(?:E[\.\-\s]*S[\.\-\s]*G[\.\s]*|Esther(?:\s+(?:Support|Service)?\s*Group)?|P[\.\-\s]*G[\.\s]*|Peace(?:\s+Group)?)(?:\s*[\-\/]?\s*Benin)?(?:\s+Member)?\s*[\)\]\}>]/gi, ' ');
 
-  // Outside brackets preceded by delimiter or space: " - ESG", ", ESG", "/ESG", "_ESG", ": ESG", " ESG", " ESG Benin", " ESG Member"
+  // Outside brackets preceded by delimiter or space: " - ESG", ", ESG", "/ESG", "_ESG", ": ESG", " ESG", " ESG Benin", " ESG Member", " - PG", ", PG", " PG"
   line = line.replace(/(?:[\s,;:\-–—/_]+)(?:E[\.\-\s]*S[\.\-\s]*G[\.\s]*|Esther\s+(?:Support\s+|Service\s+)?Group|Peace\s+Group|P[\.\-\s]*G[\.\s]*)(?:\s*[\-\/]?\s*Benin)?(?:\s+Member)?(?=$|[\s,;:\-–—/_\)\]\}>])/gi, ' ');
 
-  // Standalone ESG / E.S.G. anywhere in the line
+  // Standalone ESG / E.S.G. and PG / P.G. anywhere in the line
   line = line.replace(/\bE[\.\-\s]*S[\.\-\s]*G[\.\s]*/gi, ' ');
+  line = line.replace(/\bP[\.\-\s]*G[\.\s]*/gi, ' ');
   line = line.replace(/\bEsther\s+(?:Support\s+|Service\s+)?Group(?:\s+Benin)?\b/gi, ' ');
   line = line.replace(/\bPeace\s+Group(?:\s+Benin)?\b/gi, ' ');
   line = line.replace(/(?:[\s,;:\-–—/_]+)(?:Benin|Branch|Member)(?=$|[\s,;:\-–—/_\)\]\}>])/gi, ' ');
@@ -147,8 +151,8 @@ export function cleanPastedLine(rawLine: string): CleanedLineResult {
   line = line.replace(/\bN[\.\-\/\s]+K\b/gi, 'NK');
   line = line.replace(/\bNK\b[\.]?/gi, 'NK');
 
-  // 9. Strip religious and ministry honorifics/titles
-  line = line.replace(/\b(?:Pastor|Pastors|Pst|Rev|Reverend|Bishop|Apostle|Deacon|Dcn|Deaconess|Dcns|Elder|Evangelist|Evang|Minister|Min|Brother|Bro|Sister|Sis|Mrs|Mr|Miss|Mama|Madam|Mummy|Daddy|Dr|Engr|Barr|Chief|LPH|AGL|GL)\b/gi, ' ');
+  // 9. Strip religious and ministry honorifics/titles (with optional trailing period e.g. Sis., Bro., Pst.)
+  line = line.replace(/\b(?:Pastor|Pastors|Pst|Rev|Reverend|Bishop|Apostle|Deacon|Dcn|Deaconess|Dcns|Elder|Evangelist|Evang|Minister|Min|Brother|Bro|Sister|Sis|Mrs|Mr|Miss|Mama|Madam|Mummy|Daddy|Dr|Engr|Barr|Chief|LPH|AGL|GL)\b[\.]?/gi, ' ');
 
   // 10. Strip status keywords & meeting greetings
   line = line.replace(/\b(?:Present|Absent|Late|Excused|Attended|Here|Online|Zoom|WhatsApp|Checked in|Morning Devotional|Daily Prayer|Prayer|Amen|Good morning)\b/gi, ' ');
@@ -290,15 +294,21 @@ export function isFuzzyTokenMatch(
     }
   }
 
+  const maxLen = Math.max(tokenA.length, tokenB.length);
+  const lev = getLevenshteinSimilarity(tokenA, tokenB);
+  const levDist = Math.round((1 - lev) * maxLen);
+
+  // Prevent false matches between completely different words sharing short prefix (e.g. stefan vs stella)
+  if (maxLen <= 4 && levDist > 1) return false;
+  if (maxLen <= 6 && levDist > 2) return false;
+  if (maxLen <= 8 && levDist > 3) return false;
+
   const sim = getSimilarity(tokenA, tokenB);
   if (sim >= threshold) return true;
 
-  // Edit distance check for words of length 4+
-  const maxLen = Math.max(tokenA.length, tokenB.length);
   if (maxLen >= 4) {
-    const editDist = Math.round((1 - getLevenshteinSimilarity(tokenA, tokenB)) * maxLen);
-    if (maxLen <= 6 && editDist <= 1) return true;
-    if (maxLen >= 7 && editDist <= 2) return true;
+    if (maxLen <= 6 && levDist <= 1) return true;
+    if (maxLen >= 7 && levDist <= 2) return true;
   }
 
   return false;
@@ -311,6 +321,9 @@ export interface BeneficiaryIndexItem {
   compactSignatures: string[];
   phone: string;
   shortPhone: string;
+  isSingleName: boolean;
+  isGroupOfNames: boolean;
+  tokenCount: number;
 }
 
 /**
@@ -376,6 +389,15 @@ export function buildBeneficiaryIndex(beneficiaries: Beneficiary[]): Beneficiary
       addVariant(camelSplit);
     }
 
+    // Determine whether the beneficiary's registered name is a Single Name or a Group of Names:
+    // We clean the registered full name (stripping titles, ESG/PG, brackets)
+    const baseName = outsideName || bName;
+    const baseTokens = cleanPastedLine(baseName).cleanText.split(' ').filter(t => t.length >= 1);
+    const finalTokens = baseTokens.length > 0 ? baseTokens : cleanPastedLine(bName).cleanText.split(' ').filter(t => t.length >= 1);
+    const tokenCount = finalTokens.length;
+    const isSingleName = (tokenCount === 1);
+    const isGroupOfNames = (tokenCount >= 2);
+
     // Keep all tokens of length >= 1 so initials like "J" in "J Imasuem" are not discarded
     const variantTokenSets = nameVariants.map(v => v.split(' ').filter(t => t.length >= 1));
 
@@ -388,7 +410,10 @@ export function buildBeneficiaryIndex(beneficiaries: Beneficiary[]): Beneficiary
       variantTokenSets,
       compactSignatures,
       phone: bPhone,
-      shortPhone: bShortPhone
+      shortPhone: bShortPhone,
+      isSingleName,
+      isGroupOfNames,
+      tokenCount
     };
   });
 }
@@ -454,8 +479,10 @@ export function matchLineToBeneficiary(
   // NK must never match multi-word names like "Sister Nk Peace"
   if (cleanText === 'nk' || (isInputSingleName && lineTokens[0] === 'nk')) {
     const nkMatch = index.find(bObj => 
-      bObj.nameVariants.some(v => v === 'nk') || 
-      bObj.beneficiary.fullName.trim().toLowerCase() === 'nk'
+      bObj.isSingleName && (
+        bObj.nameVariants.some(v => v === 'nk') || 
+        bObj.beneficiary.fullName.trim().toLowerCase() === 'nk'
+      )
     );
     if (nkMatch) {
       return {
@@ -475,6 +502,17 @@ export function matchLineToBeneficiary(
   let bestRuleName = 'Unmatched';
 
   for (const bObj of index) {
+    // CRITICAL USER MANDATE:
+    // 1. A single name matches a single name ONLY.
+    // 2. A group of names matches a group of names ONLY.
+    // 3. A single name should NOT mark a group name ignoring title, ESG, PG.
+    if (isInputSingleName && bObj.isGroupOfNames) {
+      continue; // Strictly forbidden: single name cannot mark a group name!
+    }
+    if (isInputGroupOfNames && bObj.isSingleName) {
+      continue; // Strictly forbidden: group of names cannot mark a single name!
+    }
+
     let score = 0;
     let reason = '';
     let currentRuleId = 'rule_none';
@@ -540,12 +578,12 @@ export function matchLineToBeneficiary(
       }
     }
 
-    // C. Token Matching (Word-order independent, subset, and single distinctive name) - Rules 3, 4, 5, 5B
+    // C. Token Matching (Word-order independent, subset, and single distinctive name) - Rules 3, 4, 5
     if (score < 90 && lineTokens.length >= 1) {
       for (const targetTokens of bObj.variantTokenSets) {
         if (targetTokens.length === 0) continue;
 
-        // CASE 1: Group of Names vs Group of Names (2+ tokens)
+        // CASE 1: Group of Names vs Group of Names (2+ tokens on both sides)
         if (isInputGroupOfNames && targetTokens.length >= 2) {
           let matchCount = 0;
           for (const tt of targetTokens) {
@@ -579,7 +617,7 @@ export function matchLineToBeneficiary(
             }
           }
         } 
-        // CASE 2: Single Name vs Single Name (1 token only)
+        // CASE 2: Single Name vs Single Name (1 token on both sides)
         else if (isInputSingleName && targetTokens.length === 1) {
           const lt = lineTokens[0];
           const tt = targetTokens[0];
@@ -606,44 +644,6 @@ export function matchLineToBeneficiary(
             }
           }
         }
-        // CASE 3: Single Distinctive Name vs Multi-Word Group Name (Rule 5B / 5C)
-        // Solves the fault where members signing in as "Sis Juliet", "Sis Joy", "Sis Becky", "Sis Helen", "Sis Bernice",
-        // "Sis Vivian", "Sis Ruth", "Sis Itohan", "Bro Stephen" were skipped because directory has both First & Last name!
-        // Uses fuzzy similarity threshold to handle spelling variants (e.g. "Sis Julie", "Sis Beckyy", "Bro Stefan")
-        // Protected: "NK" never matches multi-word names!
-        else if (isInputSingleName && targetTokens.length >= 2) {
-          const lt = lineTokens[0];
-          if (lt.length >= 3 && lt !== 'nk' && !/^\d+$/.test(lt)) {
-            const firstToken = targetTokens[0];
-            // Check primary First Name match with similarity threshold
-            if (isFuzzyTokenMatch(lt, firstToken, 0.80)) {
-              const sim = lt === firstToken ? 1.0 : getSimilarity(lt, firstToken);
-              const currentScore = Math.round(93 * sim);
-              if (currentScore > score) {
-                score = currentScore;
-                reason = `Distinctive First Name match ("${lt}" in ${targetTokens.join(' ')})`;
-                currentRuleId = 'rule_first_name_token';
-                currentRuleName = 'Rule 5B: Distinctive First Name Match';
-              }
-            } else {
-              // Check Surname / other name match with similarity threshold
-              for (let i = 1; i < targetTokens.length; i++) {
-                const surnameToken = targetTokens[i];
-                if (isFuzzyTokenMatch(lt, surnameToken, 0.80)) {
-                  const sim = lt === surnameToken ? 1.0 : getSimilarity(lt, surnameToken);
-                  const currentScore = Math.round(91 * sim);
-                  if (currentScore > score) {
-                    score = currentScore;
-                    reason = `Distinctive Surname / Name match ("${lt}" in ${targetTokens.join(' ')})`;
-                    currentRuleId = 'rule_name_token';
-                    currentRuleName = 'Rule 5C: Distinctive Surname / Token Match';
-                    break;
-                  }
-                }
-              }
-            }
-          }
-        }
       }
     }
 
@@ -661,8 +661,8 @@ export function matchLineToBeneficiary(
         }
 
         const sim = getSimilarity(cleanText, variant);
-        if (sim >= 0.80) {
-          const currentScore = Math.round(sim * 90);
+        if (sim >= 0.78) {
+          const currentScore = Math.round(sim * 100);
           if (currentScore > score) {
             score = currentScore;
             reason = `Fuzzy name similarity (${Math.round(sim * 100)}%) to "${variant}"`;

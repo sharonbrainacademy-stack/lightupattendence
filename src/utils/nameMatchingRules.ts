@@ -155,32 +155,32 @@ export const OFFICIAL_NAME_MATCHING_RULES: NameMatchingRuleDefinition[] = [
   {
     id: 'rule_key_name',
     ruleNumber: 5,
-    name: 'Protected Name Strict Resolution ("NK" & Single Names)',
+    name: 'Strict Single Name to Single Name & Group to Group Separation',
     category: 'Single Name',
     confidence: 100,
-    badge: '🔑 100% Protected Name',
-    shortDescription: 'NK is strictly recognized as a distinct name and always matches member NK across all casing formats without false cross-matching.',
-    detailedLogic: '"NK" is a distinctive member name and always resolves to NK with 100% precision across all casing (NK, nk, Nk, nK, N.K., N K, N-K). NK will never match multi-word names (such as "Sister Nk Peace"). Distinctive single names also match single-name directory members.',
+    badge: '🔒 100% Partitioned Resolution',
+    shortDescription: 'A single name matches a single name ONLY, and a group of names matches a group of names ONLY. A single name NEVER marks a group name.',
+    detailedLogic: 'In accordance with strict ministry rules: (1) An attendee with a single name (after ignoring titles, ESG, and PG) matches ONLY directory members registered with a single name. (2) A single name NEVER marks a group name (multi-word name with first and last name, e.g. "Sis Peace" will never mark "Peace Chukwu"). (3) A group of names (2+ words) matches ONLY directory members registered with a group of names. (4) "NK" is strictly recognized as a distinctive single name and always resolves to NK across any casing (NK, nk, Nk, nK, N.K., N K, N-K), and never cross-matches group names like "Sister Nk Peace".',
     examples: [
       {
-        input: '1. NK',
-        expectedOutcome: 'Matched: NK (+234 803 555 0199)',
-        explanation: 'Uppercase "NK" maps directly to member NK with 100% confidence.'
+        input: '1. NK (or "Sis NK", "NK ESG", "nk")',
+        expectedOutcome: 'Matched: NK (Single Name)',
+        explanation: 'Single name NK resolves strictly to single-name member NK with 100% confidence, never cross-matching group names.'
       },
       {
-        input: '2. nk - Present',
-        expectedOutcome: 'Matched: NK (+234 803 555 0199)',
-        explanation: 'Lowercase "nk" matches member NK case-insensitively.'
+        input: '2. Sis Peace ESG (or "Peace (PG)")',
+        expectedOutcome: 'Does NOT mark "Peace Chukwu"',
+        explanation: 'Single name "Peace" (after stripping title Sis and ESG/PG) is never permitted to mark group name "Peace Chukwu".'
       },
       {
-        input: '3. nK',
-        expectedOutcome: 'Matched: NK (+234 803 555 0199)',
-        explanation: 'Toggle case "nK" or sentence case "Nk" matches member NK seamlessly.'
+        input: '3. Peace Chukwu',
+        expectedOutcome: 'Matched: Peace Chukwu (Group of Names)',
+        explanation: 'Group of names matches group of names in directory.'
       },
       {
-        input: '4. N.K.',
-        expectedOutcome: 'Matched: NK (+234 803 555 0199)',
-        explanation: 'Dotted notation "N.K." is normalized to NK.'
+        input: '4. Sister Nk Peace',
+        expectedOutcome: 'Matched: Sister Nk Peace',
+        explanation: 'Group of names with 2 words matches the group-of-names member, not the single-name member NK.'
       },
       {
         input: '5. Franca',
@@ -190,46 +190,14 @@ export const OFFICIAL_NAME_MATCHING_RULES: NameMatchingRuleDefinition[] = [
     ]
   },
   {
-    id: 'rule_first_name_token',
-    ruleNumber: 5.5,
-    name: 'Distinctive First Name & Surname Resolution',
-    category: 'Single Name',
-    confidence: 93,
-    badge: '👤 93% First Name Match',
-    shortDescription: 'Resolves members when they sign in with their distinctive First Name or Surname (e.g. "Sis Juliet", "Sis Joy", "Sis Becky", "Sis Helen", "Sis Bernice", "Bro Stephen").',
-    detailedLogic: 'In prayer meetings, attendees frequently sign in with their courtesy title and First Name only (e.g. "Sis Juliet", "Sis Joy", "Sis Becky", "Sis Helen", "Sis Bernice", "Sis Vivian", "Sis Ruth", "Sis Itohan", "Bro Stephen"). After titles are stripped, this rule accurately identifies and matches the corresponding registered member who bears that primary name (e.g. Juliet Johnson, Joy Aghedo, Becky Ughede, Stephen Moses) at 93% confidence.',
-    examples: [
-      {
-        input: 'Sis Juliet',
-        expectedOutcome: 'Matched: Juliet Johnson',
-        explanation: '"Sis" is stripped, and distinctive first name "Juliet" matches Juliet Johnson.'
-      },
-      {
-        input: 'Sis Joy',
-        expectedOutcome: 'Matched: Joy AGHEDO',
-        explanation: 'Matches registered directory member Joy AGHEDO.'
-      },
-      {
-        input: 'Sis Becky',
-        expectedOutcome: 'Matched: Mrs Becky Ughede',
-        explanation: 'Matches Mrs Becky Ughede with 93% confidence.'
-      },
-      {
-        input: 'Bro Stephen',
-        expectedOutcome: 'Matched: Stephen Moses',
-        explanation: 'Matches member Stephen Moses.'
-      }
-    ]
-  },
-  {
     id: 'rule_honorific',
     ruleNumber: 6,
-    name: 'ESG Group Tag & Ministry Title Cleansing',
+    name: 'ESG & PG Group Tag & Ministry Title Cleansing',
     category: 'Noise Filter',
-    confidence: 92,
-    badge: '👑 92% Title & ESG Cleaned',
-    shortDescription: 'Comprehensively ignores "ESG" (either inside brackets or outside brackets after any name), group tags, and ministry titles.',
-    detailedLogic: 'Members often add "ESG" or ministry designations after their names in roll calls, such as "Joy Aghedo (ESG)", "Joy Aghedo ESG", "Joy Aghedo - ESG", "Joy Aghedo, ESG", "Edith Aghedo (E.S.G.)", "Joy Aghedo (ESG Benin)", or "NK (ESG)". The matching engine strictly ignores ESG across all casing, bracketed ([ESG], (ESG), {ESG}), and unbracketed variations so it never pollutes name matching or single-to-group partitioning. Titles like "Pastor", "Pst", "Deaconess", "Sister", "Sis", "Mrs", "AGL", "GL" are also cleanly stripped.',
+    confidence: 95,
+    badge: '👑 95% Title, ESG & PG Cleaned',
+    shortDescription: 'Comprehensively ignores "ESG" and "PG" (either inside brackets or outside brackets after any name) and ministry titles.',
+    detailedLogic: 'Members frequently append "ESG", "(ESG)", "[ESG]", "PG", "(PG)", or "[PG]" after their names (e.g. "Joy Aghedo (ESG)", "Peace (PG)", "Joy Aghedo - ESG", "NK (PG)"). The engine cleanly strips all ESG and PG tags across all casing and brackets, as well as titles ("Pastor", "Pst", "Deacon", "Deaconess", "Sister", "Sis", "Brother", "Bro", "Mrs", "Mr"). After stripping, the single-name vs group-of-names rule is strictly applied.',
     examples: [
       {
         input: '1. Juliet Johnson (ESG)',

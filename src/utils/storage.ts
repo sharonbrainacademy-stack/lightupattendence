@@ -275,29 +275,9 @@ export function subscribeToAttendanceSessions(callback: (list: AttendanceSession
     });
 
     if (list.length > 0) {
-      // Purge any unauthorized Peace Group attendance sessions from Firestore
-      const peaceSessions = list.filter(s =>
-        s.id === 'att-sample-peace-today' ||
-        s.serviceName?.toLowerCase().includes('peace group') ||
-        s.notes?.toLowerCase().includes('peace group')
-      );
-      if (peaceSessions.length > 0) {
-        peaceSessions.forEach(s => {
-          deleteDoc(doc(db, 'attendanceSessions', s.id)).catch(() => {});
-        });
-      }
-
-      // Keep only Esther Group sessions and filter out peace records from within sessions
-      const cleanSessions = list
-        .filter(s => s.id !== 'att-sample-peace-today' && !s.serviceName?.toLowerCase().includes('peace group'))
-        .map(s => ({
-          ...s,
-          records: (s.records || []).filter(r => r.category !== 'Peace Group' && !r.beneficiaryId?.startsWith('pgm-'))
-        }));
-
-      cleanSessions.sort((a, b) => b.serviceDate.localeCompare(a.serviceDate));
-      localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(cleanSessions));
-      callback(cleanSessions);
+      list.sort((a, b) => b.serviceDate.localeCompare(a.serviceDate));
+      localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(list));
+      callback(list);
     }
   }, (err) => {
     handleFirestoreError(err, OperationType.GET, 'attendanceSessions');

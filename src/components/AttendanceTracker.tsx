@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Calendar, UserCheck, UserX, Clock, CheckCircle2, Search, Filter, Sparkles, MessageSquare, History, Plus, Save, Trash2, ArrowRight, ShieldCheck, Download, Upload, FileText, X, AlertCircle, HelpCircle, Check, Zap, ArrowRightLeft, BookOpen, Tag } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { Beneficiary, AttendanceSession, AttendanceRecordItem, AttendanceStatus, UserRole, MinistryGroup } from '../types';
@@ -63,55 +63,6 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
   );
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
 
-  // Automatically sync category filter, draft, and recordsMap when activeGroup changes
-  useEffect(() => {
-    if (activeGroup === 'Peace Group') {
-      setCategoryFilter('Peace Group');
-      setServiceName(prev => prev.includes('Esther') || prev === 'Daily Morning Devotional Prayers' ? 'Daily Morning Devotional Prayers (Peace Group)' : prev);
-    } else {
-      setCategoryFilter('Esther Group Benin');
-      setServiceName(prev => prev.includes('Peace') || prev === 'Daily Morning Devotional Prayers' ? 'Daily Morning Devotional Prayers (Esther Group)' : prev);
-    }
-
-    // Try loading saved draft for this specific group
-    try {
-      const savedDraft = localStorage.getItem(`lightup_attendance_draft_${activeGroup}`);
-      if (savedDraft) {
-        const parsed = JSON.parse(savedDraft);
-        if (parsed && parsed.recordsMap && Object.keys(parsed.recordsMap).length > 0) {
-          setRecordsMap(parsed.recordsMap);
-          if (parsed.serviceName) setServiceName(parsed.serviceName);
-          if (parsed.notes) setNotes(parsed.notes);
-          return;
-        }
-      }
-    } catch (e) {
-      console.warn('Draft load ignored');
-    }
-
-    // If no draft exists, initialize recordsMap with members of the active group
-    const initialMap: Record<string, AttendanceRecordItem> = {};
-    const relevantBeneficiaries = (beneficiaries || []).filter(b => {
-      if (activeGroup === 'Peace Group') {
-        return b.category === 'Peace Group' || Boolean(b.notes && b.notes.toLowerCase().includes('peace'));
-      } else {
-        return b.category === 'Esther Group Benin' || Boolean(b.notes && b.notes.toLowerCase().includes('esther')) || (!b.category?.toLowerCase().includes('peace') && !b.notes?.toLowerCase().includes('peace'));
-      }
-    });
-
-    relevantBeneficiaries.forEach(b => {
-      initialMap[b.id] = {
-        beneficiaryId: b.id,
-        fullName: b.fullName,
-        phoneNumber: b.phoneNumber,
-        category: b.category,
-        status: 'Absent',
-        checkInTime: '05:00'
-      };
-    });
-    setRecordsMap(initialMap);
-  }, [activeGroup, beneficiaries]);
-
   // Attendance Records State map: beneficiaryId -> AttendanceRecordItem
   const [recordsMap, setRecordsMap] = useState<Record<string, AttendanceRecordItem>>(() => {
     try {
@@ -148,9 +99,70 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
     return initialMap;
   });
 
-  // Auto-save working attendance draft to LocalStorage
+  // Track previous active group to only reload draft or reset when activeGroup genuinely changes
+  const prevGroupRef = useRef(activeGroup);
+
+  // Automatically sync category filter and service title when activeGroup changes
   useEffect(() => {
-    if (Object.keys(recordsMap).length > 0) {
+    const groupChanged = prevGroupRef.current !== activeGroup;
+    prevGroupRef.current = activeGroup;
+
+    if (activeGroup === 'Peace Group') {
+      setCategoryFilter('Peace Group');
+      setServiceName(prev => prev.includes('Esther') || prev === 'Daily Morning Devotional Prayers' ? 'Daily Morning Devotional Prayers (Peace Group)' : prev);
+    } else {
+      setCategoryFilter('Esther Group Benin');
+      setServiceName(prev => prev.includes('Peace') || prev === 'Daily Morning Devotional Prayers' ? 'Daily Morning Devotional Prayers (Esther Group)' : prev);
+    }
+
+    if (!groupChanged) {
+      return;
+    }
+
+    // Try loading saved draft for this specific group ONLY if currently on a NEW roll call
+    if (selectedSessionId === 'NEW') {
+      try {
+        const savedDraft = localStorage.getItem(`lightup_attendance_draft_${activeGroup}`);
+        if (savedDraft) {
+          const parsed = JSON.parse(savedDraft);
+          if (parsed && parsed.recordsMap && Object.keys(parsed.recordsMap).length > 0) {
+            setRecordsMap(parsed.recordsMap);
+            if (parsed.serviceName) setServiceName(parsed.serviceName);
+            if (parsed.notes) setNotes(parsed.notes);
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('Draft load ignored');
+      }
+
+      // If no draft exists, initialize recordsMap with members of the active group
+      const initialMap: Record<string, AttendanceRecordItem> = {};
+      const relevantBeneficiaries = (beneficiaries || []).filter(b => {
+        if (activeGroup === 'Peace Group') {
+          return b.category === 'Peace Group' || Boolean(b.notes && b.notes.toLowerCase().includes('peace'));
+        } else {
+          return b.category === 'Esther Group Benin' || Boolean(b.notes && b.notes.toLowerCase().includes('esther')) || (!b.category?.toLowerCase().includes('peace') && !b.notes?.toLowerCase().includes('peace'));
+        }
+      });
+
+      relevantBeneficiaries.forEach(b => {
+        initialMap[b.id] = {
+          beneficiaryId: b.id,
+          fullName: b.fullName,
+          phoneNumber: b.phoneNumber,
+          category: b.category,
+          status: 'Absent',
+          checkInTime: '05:00'
+        };
+      });
+      setRecordsMap(initialMap);
+    }
+  }, [activeGroup, selectedSessionId]);
+
+  // Auto-save working attendance draft to LocalStorage only for NEW active roll call
+  useEffect(() => {
+    if (Object.keys(recordsMap).length > 0 && selectedSessionId === 'NEW') {
       try {
         const draft = {
           selectedSessionId,
@@ -198,6 +210,7 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
   // Auto-Mark Attendance Modal via Text Paste / File Upload
   const [isAutoMarkModalOpen, setIsAutoMarkModalOpen] = useState(false);
   const [autoMarkPasteMode, setAutoMarkPasteMode] = useState<'combined' | 'dual'>('dual');
+  const [autoMarkMergeMode, setAutoMarkMergeMode] = useState<'merge' | 'replace'>('merge');
   const [rawPastedText, setRawPastedText] = useState('');
   const [whatsappText, setWhatsappText] = useState('');
   const [zoomText, setZoomText] = useState('');
@@ -208,6 +221,150 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
   const [quickPasteText, setQuickPasteText] = useState('');
   const [isRulesModalOpen, setIsRulesModalOpen] = useState(false);
   const [isNameMatchingRulesOpen, setIsNameMatchingRulesOpen] = useState(false);
+
+  // Load a session when selected
+  const handleSelectSession = (sessionId: string) => {
+    if (sessionId === 'NEW') {
+      const existingToday = (attendanceSessions || []).find(s => s.serviceDate === todayStr);
+      if (existingToday) {
+        setSelectedSessionId(existingToday.id);
+        setServiceDate(existingToday.serviceDate);
+        setServiceName(existingToday.serviceName);
+        setServiceType(existingToday.serviceType);
+        setNotes(existingToday.notes || '');
+
+        const mapFromSession: Record<string, AttendanceRecordItem> = {};
+        (beneficiaries || []).forEach(b => {
+          if (!b || !b.id) return;
+          const bNameNorm = normalizeAttendanceString(b.fullName || '');
+          const existingRecord = (existingToday.records || []).find(r => 
+            (r.beneficiaryId && r.beneficiaryId === b.id) || 
+            (r.fullName && normalizeAttendanceString(r.fullName) === bNameNorm)
+          );
+          if (existingRecord) {
+            mapFromSession[b.id] = existingRecord;
+          } else {
+            mapFromSession[b.id] = {
+              beneficiaryId: b.id,
+              fullName: b.fullName || 'Member',
+              phoneNumber: b.phoneNumber || '',
+              category: b.category || 'Other',
+              status: 'Absent'
+            };
+          }
+        });
+        setRecordsMap(mapFromSession);
+      } else {
+        setSelectedSessionId('NEW');
+        setServiceDate(todayStr);
+        setServiceName('Daily Morning Devotional Prayers');
+        setServiceType('Daily Morning Devotional');
+        setNotes('');
+
+        const freshMap: Record<string, AttendanceRecordItem> = {};
+        (beneficiaries || []).forEach(b => {
+          if (!b || !b.id) return;
+          freshMap[b.id] = {
+            beneficiaryId: b.id,
+            fullName: b.fullName || 'Member',
+            phoneNumber: b.phoneNumber || '',
+            category: b.category || 'Other',
+            status: 'Absent'
+          };
+        });
+        setRecordsMap(freshMap);
+      }
+      return;
+    }
+
+    const targetSession = (attendanceSessions || []).find(s => s.id === sessionId);
+    if (targetSession) {
+      setSelectedSessionId(targetSession.id);
+      setServiceDate(targetSession.serviceDate);
+      setServiceName(targetSession.serviceName);
+      setServiceType(targetSession.serviceType);
+      setNotes(targetSession.notes || '');
+
+      const mapFromSession: Record<string, AttendanceRecordItem> = {};
+      (beneficiaries || []).forEach(b => {
+        if (!b || !b.id) return;
+        const bNameNorm = normalizeAttendanceString(b.fullName || '');
+        const existingRecord = (targetSession.records || []).find(r => 
+          (r.beneficiaryId && r.beneficiaryId === b.id) || 
+          (r.fullName && normalizeAttendanceString(r.fullName) === bNameNorm)
+        );
+        if (existingRecord) {
+          mapFromSession[b.id] = existingRecord;
+        } else {
+          mapFromSession[b.id] = {
+            beneficiaryId: b.id,
+            fullName: b.fullName || 'Member',
+            phoneNumber: b.phoneNumber || '',
+            category: b.category || 'Other',
+            status: 'Absent'
+          };
+        }
+      });
+      setRecordsMap(mapFromSession);
+    }
+  };
+
+  // Automatically select target session when requested externally (e.g. from Records Library edit date)
+  useEffect(() => {
+    if (initialSelectedSessionId) {
+      handleSelectSession(initialSelectedSessionId);
+      if (onClearInitialSelectedSessionId) {
+        onClearInitialSelectedSessionId();
+      }
+    }
+  }, [initialSelectedSessionId]);
+
+  // Helper to automatically persist attendance changes immediately to storage
+  const autoSaveSession = (
+    newRecordsMap: Record<string, AttendanceRecordItem>,
+    overrideSessionId?: string,
+    overrideDate?: string,
+    overrideType?: AttendanceSession['serviceType'],
+    overrideName?: string,
+    overrideNotes?: string
+  ) => {
+    const activeDate = overrideDate || serviceDate;
+    const activeSessionId = (overrideSessionId || selectedSessionId) === 'NEW' ? `att-${activeDate}` : (overrideSessionId || selectedSessionId);
+    
+    if (selectedSessionId === 'NEW' && !overrideSessionId) {
+      setSelectedSessionId(activeSessionId);
+    }
+
+    const sessionObj: AttendanceSession = {
+      id: activeSessionId,
+      serviceName: overrideName !== undefined ? overrideName : serviceName,
+      serviceType: overrideType !== undefined ? overrideType : serviceType,
+      serviceDate: activeDate,
+      recordedBy: currentUserName,
+      notes: overrideNotes !== undefined ? overrideNotes : notes,
+      records: Object.values(newRecordsMap),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    onSaveSession(sessionObj);
+  };
+
+  // Handle date change with automatic loading of existing sessions for that date
+  const handleDateChange = (newDate: string) => {
+    if (!newDate) return;
+    setServiceDate(newDate);
+
+    // If on a NEW roll call, check if an existing session for newDate already exists in history
+    if (selectedSessionId === 'NEW') {
+      const existing = (attendanceSessions || []).find(s => s.serviceDate === newDate);
+      if (existing) {
+        handleSelectSession(existing.id);
+        setSaveNotification(`ℹ️ Loaded existing attendance session for ${newDate}.`);
+        setTimeout(() => setSaveNotification(null), 3500);
+      }
+    }
+  };
 
   // Dedicated Edit Attendance Record Date & Info State
   const [editingDateSession, setEditingDateSession] = useState<AttendanceSession | null>(null);
@@ -292,6 +449,7 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
 
     if (result.presentMembers.length > 0) {
       const newMap: Record<string, AttendanceRecordItem> = { ...recordsMap };
+      const nowCheckIn = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
       result.presentMembers.forEach(m => {
         newMap[m.id] = {
           beneficiaryId: m.id,
@@ -299,11 +457,12 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
           phoneNumber: m.phoneNumber,
           category: m.category,
           status: 'Present',
-          checkInTime: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+          checkInTime: newMap[m.id]?.checkInTime || nowCheckIn
         };
       });
       setRecordsMap(newMap);
-      setSaveNotification(`⚡ Auto-Mark Success: Matched and marked ${result.presentMembers.length} attendees as Present!`);
+      autoSaveSession(newMap);
+      setSaveNotification(`⚡ Auto-Mark Success: Matched ${result.presentMembers.length} attendees and saved to Roll Call!`);
       setTimeout(() => setSaveNotification(null), 5000);
       setQuickPasteText('');
       setIsQuickPasteOpen(false);
@@ -402,48 +561,64 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
 
     const newMap: Record<string, AttendanceRecordItem> = {};
     const presentSet = new Set(autoMatchResult.presentMembers.map(m => m.id));
+    const nowCheckIn = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
 
     beneficiaries.forEach(b => {
-      if (presentSet.has(b.id)) {
-        newMap[b.id] = {
-          beneficiaryId: b.id,
-          fullName: b.fullName,
-          phoneNumber: b.phoneNumber,
-          category: b.category,
-          status: 'Present'
-        };
+      const existing = recordsMap[b.id];
+      const isAlreadyPresent = existing && (existing.status === 'Present' || existing.status === 'Late');
+
+      if (autoMarkMergeMode === 'merge') {
+        if (presentSet.has(b.id)) {
+          newMap[b.id] = {
+            beneficiaryId: b.id,
+            fullName: b.fullName,
+            phoneNumber: b.phoneNumber,
+            category: b.category,
+            status: 'Present',
+            checkInTime: existing?.checkInTime || nowCheckIn
+          };
+        } else if (isAlreadyPresent) {
+          // Keep existing present/late status when merging
+          newMap[b.id] = existing;
+        } else {
+          newMap[b.id] = {
+            beneficiaryId: b.id,
+            fullName: b.fullName,
+            phoneNumber: b.phoneNumber,
+            category: b.category,
+            status: 'Absent'
+          };
+        }
       } else {
-        newMap[b.id] = {
-          beneficiaryId: b.id,
-          fullName: b.fullName,
-          phoneNumber: b.phoneNumber,
-          category: b.category,
-          status: 'Absent'
-        };
+        // Replace mode
+        if (presentSet.has(b.id)) {
+          newMap[b.id] = {
+            beneficiaryId: b.id,
+            fullName: b.fullName,
+            phoneNumber: b.phoneNumber,
+            category: b.category,
+            status: 'Present',
+            checkInTime: existing?.checkInTime || nowCheckIn
+          };
+        } else {
+          newMap[b.id] = {
+            beneficiaryId: b.id,
+            fullName: b.fullName,
+            phoneNumber: b.phoneNumber,
+            category: b.category,
+            status: 'Absent'
+          };
+        }
       }
     });
 
     setRecordsMap(newMap);
-
-    // Auto-save uploaded session directly to ministry database
-    const activeSessionId = selectedSessionId === 'NEW' ? `att-${Date.now()}` : selectedSessionId;
-    const sessionObj: AttendanceSession = {
-      id: activeSessionId,
-      serviceName,
-      serviceType,
-      serviceDate,
-      recordedBy: currentUserName,
-      notes: notes || `Auto-marked attendance list uploaded on ${todayStr}`,
-      records: Object.values(newMap),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-
-    onSaveSession(sessionObj);
-    setSelectedSessionId(activeSessionId);
+    autoSaveSession(newMap);
 
     setIsAutoMarkModalOpen(false);
-    setSaveNotification(`⚡ Auto-Mark Upload Applied & Saved to Archive! Marked ${autoMatchResult.presentMembers.length} Present & ${autoMatchResult.absentMembers.length} Absent.`);
+    const totalPresent = Object.values(newMap).filter(r => r.status === 'Present' || r.status === 'Late').length;
+    const totalAbsent = Object.values(newMap).filter(r => r.status === 'Absent').length;
+    setSaveNotification(`⚡ Auto-Mark Upload Applied & Saved to Archive! Current roll call: ${totalPresent} Present & ${totalAbsent} Absent.`);
     setTimeout(() => setSaveNotification(null), 5000);
   };
 
@@ -1164,133 +1339,6 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
     setIsExportModalOpen(false);
   };
 
-  // Load a session when selected
-  const handleSelectSession = (sessionId: string) => {
-    if (sessionId === 'NEW') {
-      const existingToday = (attendanceSessions || []).find(s => s.serviceDate === todayStr);
-      if (existingToday) {
-        setSelectedSessionId(existingToday.id);
-        setServiceDate(existingToday.serviceDate);
-        setServiceName(existingToday.serviceName);
-        setServiceType(existingToday.serviceType);
-        setNotes(existingToday.notes || '');
-
-        const mapFromSession: Record<string, AttendanceRecordItem> = {};
-        (beneficiaries || []).forEach(b => {
-          if (!b || !b.id) return;
-          const bNameNorm = normalizeAttendanceString(b.fullName || '');
-          const existingRecord = (existingToday.records || []).find(r => 
-            (r.beneficiaryId && r.beneficiaryId === b.id) || 
-            (r.fullName && normalizeAttendanceString(r.fullName) === bNameNorm)
-          );
-          if (existingRecord) {
-            mapFromSession[b.id] = existingRecord;
-          } else {
-            mapFromSession[b.id] = {
-              beneficiaryId: b.id,
-              fullName: b.fullName || 'Member',
-              phoneNumber: b.phoneNumber || '',
-              category: b.category || 'Other',
-              status: 'Absent'
-            };
-          }
-        });
-        setRecordsMap(mapFromSession);
-      } else {
-        setSelectedSessionId('NEW');
-        setServiceDate(todayStr);
-        setServiceName('Daily Morning Devotional Prayers');
-        setServiceType('Daily Morning Devotional');
-        setNotes('');
-
-        const freshMap: Record<string, AttendanceRecordItem> = {};
-        (beneficiaries || []).forEach(b => {
-          if (!b || !b.id) return;
-          freshMap[b.id] = {
-            beneficiaryId: b.id,
-            fullName: b.fullName || 'Member',
-            phoneNumber: b.phoneNumber || '',
-            category: b.category || 'Other',
-            status: 'Absent'
-          };
-        });
-        setRecordsMap(freshMap);
-      }
-      return;
-    }
-
-    const targetSession = (attendanceSessions || []).find(s => s.id === sessionId);
-    if (targetSession) {
-      setSelectedSessionId(targetSession.id);
-      setServiceDate(targetSession.serviceDate);
-      setServiceName(targetSession.serviceName);
-      setServiceType(targetSession.serviceType);
-      setNotes(targetSession.notes || '');
-
-      const mapFromSession: Record<string, AttendanceRecordItem> = {};
-      (beneficiaries || []).forEach(b => {
-        if (!b || !b.id) return;
-        const bNameNorm = normalizeAttendanceString(b.fullName || '');
-        const existingRecord = (targetSession.records || []).find(r => 
-          (r.beneficiaryId && r.beneficiaryId === b.id) || 
-          (r.fullName && normalizeAttendanceString(r.fullName) === bNameNorm)
-        );
-        if (existingRecord) {
-          mapFromSession[b.id] = existingRecord;
-        } else {
-          mapFromSession[b.id] = {
-            beneficiaryId: b.id,
-            fullName: b.fullName || 'Member',
-            phoneNumber: b.phoneNumber || '',
-            category: b.category || 'Other',
-            status: 'Absent'
-          };
-        }
-      });
-      setRecordsMap(mapFromSession);
-    }
-  };
-
-  // Automatically select target session when requested externally (e.g. from Records Library edit date)
-  useEffect(() => {
-    if (initialSelectedSessionId) {
-      handleSelectSession(initialSelectedSessionId);
-      if (onClearInitialSelectedSessionId) {
-        onClearInitialSelectedSessionId();
-      }
-    }
-  }, [initialSelectedSessionId]);
-
-  // Helper to automatically persist attendance changes immediately to storage
-  const autoSaveSession = (
-    newRecordsMap: Record<string, AttendanceRecordItem>,
-    overrideSessionId?: string,
-    overrideDate?: string,
-    overrideType?: AttendanceSession['serviceType'],
-    overrideName?: string,
-    overrideNotes?: string
-  ) => {
-    const activeDate = overrideDate || serviceDate;
-    const activeSessionId = (overrideSessionId || selectedSessionId) === 'NEW' ? `att-${activeDate}` : (overrideSessionId || selectedSessionId);
-    
-    if (selectedSessionId === 'NEW' && !overrideSessionId) {
-      setSelectedSessionId(activeSessionId);
-    }
-
-    const sessionObj: AttendanceSession = {
-      id: activeSessionId,
-      serviceName: overrideName !== undefined ? overrideName : serviceName,
-      serviceType: overrideType !== undefined ? overrideType : serviceType,
-      serviceDate: activeDate,
-      recordedBy: currentUserName,
-      notes: overrideNotes !== undefined ? overrideNotes : notes,
-      records: Object.values(newRecordsMap),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-
-    onSaveSession(sessionObj);
-  };
 
   // Keep recordsMap in sync when beneficiaries list updates
   useEffect(() => {
@@ -2114,7 +2162,7 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
               <div className="flex items-center gap-1 text-[10px] font-mono">
                 <button
                   type="button"
-                  onClick={() => setServiceDate(todayStr)}
+                  onClick={() => handleDateChange(todayStr)}
                   className="px-1.5 py-0.2 rounded bg-purple-900 hover:bg-purple-800 text-amber-300 border border-purple-700 cursor-pointer"
                 >
                   Today
@@ -2123,7 +2171,7 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
                   type="button"
                   onClick={() => {
                     const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-                    setServiceDate(yesterday);
+                    handleDateChange(yesterday);
                   }}
                   className="px-1.5 py-0.2 rounded bg-purple-900 hover:bg-purple-800 text-amber-300 border border-purple-700 cursor-pointer"
                 >
@@ -2133,7 +2181,7 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
                   type="button"
                   onClick={() => {
                     const twoDays = new Date(Date.now() - 2 * 86400000).toISOString().split('T')[0];
-                    setServiceDate(twoDays);
+                    handleDateChange(twoDays);
                   }}
                   className="px-1.5 py-0.2 rounded bg-purple-900 hover:bg-purple-800 text-amber-300 border border-purple-700 cursor-pointer hidden sm:inline-block"
                 >
@@ -2145,7 +2193,7 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
               <input
                 type="date"
                 value={serviceDate}
-                onChange={(e) => setServiceDate(e.target.value)}
+                onChange={(e) => handleDateChange(e.target.value)}
                 className="w-full px-3.5 py-2.5 rounded-xl bg-purple-900/60 border border-amber-500/60 text-white text-xs font-bold font-mono focus:outline-none focus:border-amber-400 shadow-inner"
               />
               {selectedSessionId !== 'NEW' && (
@@ -3015,10 +3063,42 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
                       className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 text-purple-950 font-black text-xs shadow-md cursor-pointer shrink-0 flex items-center gap-1.5"
                     >
                       <Check className="w-4 h-4 stroke-[3]" />
-                      <span>Apply {autoMatchResult.presentMembers.length} Present to Roll Call</span>
+                      <span>{autoMarkMergeMode === 'merge' ? `Merge ${autoMatchResult.presentMembers.length} Present into Roll Call` : `Replace Roll Call with ${autoMatchResult.presentMembers.length} Present`}</span>
                     </button>
                   </div>
                 )}
+
+                {/* Roll Call Merge / Replace Mode Selector */}
+                <div className="p-3 rounded-2xl bg-purple-900/60 border border-purple-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <span className="font-extrabold text-amber-300 flex items-center gap-1.5">
+                    <Zap className="w-4 h-4 text-amber-400" />
+                    <span>Roll Call Update Mode:</span>
+                  </span>
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-1.5 cursor-pointer text-purple-200 hover:text-white font-bold">
+                      <input
+                        type="radio"
+                        name="autoMarkMergeMode"
+                        value="merge"
+                        checked={autoMarkMergeMode === 'merge'}
+                        onChange={() => setAutoMarkMergeMode('merge')}
+                        className="accent-amber-400"
+                      />
+                      <span>⚡ Merge (Keep previously marked Present attendees)</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer text-purple-200 hover:text-white font-bold">
+                      <input
+                        type="radio"
+                        name="autoMarkMergeMode"
+                        value="replace"
+                        checked={autoMarkMergeMode === 'replace'}
+                        onChange={() => setAutoMarkMergeMode('replace')}
+                        className="accent-amber-400"
+                      />
+                      <span>🔄 Replace (Overwrite entire roll call)</span>
+                    </label>
+                  </div>
+                </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   {/* Matched Present */}
@@ -3176,7 +3256,7 @@ export const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({
                     className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-purple-950 font-black text-xs flex items-center gap-2 shadow-lg cursor-pointer"
                   >
                     <CheckCircle2 className="w-4 h-4 text-purple-950" />
-                    <span>Apply {autoMatchResult.presentMembers.length} Present &amp; {autoMatchResult.absentMembers.length} Absent to Register</span>
+                    <span>{autoMarkMergeMode === 'merge' ? `Merge ${autoMatchResult.presentMembers.length} Present into Register` : `Replace Register with ${autoMatchResult.presentMembers.length} Present`}</span>
                   </button>
                 </div>
               </div>

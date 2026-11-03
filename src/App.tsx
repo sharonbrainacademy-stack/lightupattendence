@@ -138,9 +138,7 @@ export default function App() {
 
   // Load initial state, purge unauthorized peace group members, and subscribe to real-time Cloud Firestore updates
   useEffect(() => {
-    // Purge any residual Peace Group members from local storage & Firestore
-    const cleanBeneficiaries = purgePeaceGroupAndResetToEsther();
-    setBeneficiaries(cleanBeneficiaries);
+    setBeneficiaries(getBeneficiaries());
     setAttendanceSessions(getAttendanceSessions());
     setBulkLogs(getBulkMessageLogs());
     setAuditLogs(getAuditLogs());
